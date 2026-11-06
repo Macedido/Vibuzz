@@ -5,10 +5,14 @@ export const config = {
   apiUrl: (process.env.EXPO_PUBLIC_API_URL ?? '').replace(/\/+$/, ''),
 };
 
+/**
+ * Supabase is required for the app to open at all. The API URL is not: without
+ * it people can still sign in, browse and manage personas, and AI actions show
+ * a clear "not configured" message.
+ */
 export function missingConfig(): string[] {
   const out: string[] = [];
   if (!config.supabaseUrl) out.push('EXPO_PUBLIC_SUPABASE_URL');
   if (!config.supabaseAnonKey) out.push('EXPO_PUBLIC_SUPABASE_ANON_KEY');
-  if (!config.apiUrl) out.push('EXPO_PUBLIC_API_URL');
   return out;
 }

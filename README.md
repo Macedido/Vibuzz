@@ -28,7 +28,7 @@ O Vibuzz é uma plataforma onde qualquer pessoa cria personagens, conversa com e
 apps/mobile      App Expo (React Native + TypeScript, Expo Router) — Android, iOS, web
 apps/api         API Node/TypeScript (Fastify): motor de IA, memória, visão, moderação, fila
 packages/shared  Esquemas zod e tipos compartilhados
-supabase/        Migrations SQL (schema, RLS, funções, storage)
+supabase/        Migrations SQL (schema, RLS, funções, storage) — aplicadas no projeto Supabase "Vibuzz"
 scripts/         Validação das migrations (PGlite + pgvector) e geração de ícones
 docs/            Setup, arquitetura, status, termos, privacidade, especificação
 ```

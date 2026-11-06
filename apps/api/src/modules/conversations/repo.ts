@@ -74,6 +74,17 @@ export class Repo {
     for (let i = 0; i < ids.length; i += size) await fn(ids.slice(i, i + size));
   }
 
+  /** True when either user blocked the other. */
+  async isBlockedPair(a: string, b: string): Promise<boolean> {
+    if (a === b) return false;
+    const { data } = await this.db
+      .from('blocks')
+      .select('blocker_id')
+      .or(`and(blocker_id.eq.${a},blocked_id.eq.${b}),and(blocker_id.eq.${b},blocked_id.eq.${a})`)
+      .limit(1);
+    return Boolean(data?.length);
+  }
+
   async enqueue(type: string, payload: Record<string, unknown>, dedupeKey?: string, delaySeconds = 0) {
     await this.db.rpc('enqueue_job', { p_type: type, p_payload: payload, p_dedupe_key: dedupeKey ?? null, p_delay_seconds: delaySeconds });
   }

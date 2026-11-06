@@ -39,16 +39,14 @@ export class ConversationService {
     if (character.kind === 'member') throw notFound('Personagem');
     if (character.status !== 'active' || character.visibility === 'private') throw notFound('Personagem');
     if (character.maturity === 'mature' && !(viewer.isAdult && viewer.allow_mature)) throw forbidden('Conteúdo adulto indisponível para sua conta.');
-    const { data } = await this.db.rpc('is_blocked_pair', { a: viewer.id, b: character.creator_id });
-    if (data === true) throw notFound('Personagem');
+    if (await this.repo.isBlockedPair(viewer.id, character.creator_id)) throw notFound('Personagem');
   }
 
   /** Existing conversations keep working if a creator unpublishes, but age and block rules still apply. */
   async assertCanContinue(character: CharacterWithSheet, viewer: { id: string; isAdult: boolean; allow_mature: boolean }) {
     if (character.creator_id === viewer.id) return;
     if (character.maturity === 'mature' && !(viewer.isAdult && viewer.allow_mature)) throw forbidden('Conteúdo adulto indisponível para sua conta.');
-    const { data } = await this.db.rpc('is_blocked_pair', { a: viewer.id, b: character.creator_id });
-    if (data === true) throw forbidden('Você não pode conversar com este personagem.');
+    if (await this.repo.isBlockedPair(viewer.id, character.creator_id)) throw forbidden('Você não pode conversar com este personagem.');
   }
 
   private async assertQuota(userId: string) {

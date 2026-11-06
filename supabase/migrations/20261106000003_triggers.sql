@@ -64,6 +64,7 @@ create trigger on_auth_user_created
 create or replace function public.guard_allow_mature()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 begin
   if new.allow_mature and extract(year from age(current_date, new.birthdate)) < 18 then

@@ -27,7 +27,7 @@ function networkError(e: unknown): ApiError {
 
 /** JSON request to the Vibuzz API. */
 export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  if (!config.apiUrl) throw new ApiError(0, 'not_configured', 'EXPO_PUBLIC_API_URL não configurada.');
+  if (!config.apiUrl) throw new ApiError(0, 'not_configured', 'O servidor de IA do Vibuzz ainda não está no ar. Tente mais tarde.');
   let res: Response;
   try {
     res = await fetch(`${config.apiUrl}${path}`, {
@@ -57,7 +57,7 @@ function safeJson(t: string): any {
  * the response body can be read incrementally on iOS and Android.
  */
 export async function stream(path: string, body: unknown, onEvent: (e: StreamEvent) => void, signal?: AbortSignal): Promise<void> {
-  if (!config.apiUrl) throw new ApiError(0, 'not_configured', 'EXPO_PUBLIC_API_URL não configurada.');
+  if (!config.apiUrl) throw new ApiError(0, 'not_configured', 'O servidor de IA do Vibuzz ainda não está no ar. Tente mais tarde.');
   let res: Awaited<ReturnType<typeof expoFetch>>;
   try {
     res = await expoFetch(`${config.apiUrl}${path}`, {

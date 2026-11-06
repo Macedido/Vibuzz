@@ -4,7 +4,7 @@ Atualizado em 06/11/2026 · versão 1.0.0
 
 ## Funcionalidades concluídas
 
-**Fundação** — monorepo (npm workspaces), app Expo SDK 58 com Expo Router e TypeScript, identidade visual própria (tema escuro, verde-ácido + lilás, ícones gerados), navegação com 5 abas, API Fastify modular, Supabase com 9 migrations, login/cadastro com idade mínima, recuperação de senha, perfis.
+**Fundação** — monorepo (npm workspaces), app Expo SDK 58 com Expo Router e TypeScript, identidade visual própria (tema escuro, verde-ácido + lilás, ícones gerados), navegação com 5 abas, API Fastify modular, Supabase com 10 migrations, login/cadastro com idade mínima, recuperação de senha, perfis.
 
 **Personagens** — ficha estruturada (nome, gênero, idade, frase, aparência, biografia, personalidade, passado, fala, gostos, desgostos, medos, objetivos, hábitos, comportamentos, relações, universo, cenário, primeira mensagem, instruções); nada obrigatório além do nome; avatar e galeria; categorias e tags; público / por link / privado; classificação Livre / 13+ / 18+; versões imutáveis com prévia das mudanças e restauração; página do personagem; apagar (ou despublicar se outros conversam com ele).
 
@@ -28,7 +28,9 @@ Atualizado em 06/11/2026 · versão 1.0.0
 
 | Suíte | Comando | Resultado |
 |---|---|---|
-| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 69/69 |
+| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 70/70 |
+| Banco real no Supabase (projeto `Vibuzz`, sa-east-1): cadastro, idade mínima, RLS, busca, curtidas — em transação desfeita | SQL | ok |
+| Supabase Security Advisor | painel | só avisos esperados (`is_username_available`, `conversation_path`, tabelas só do servidor) |
 | API: provedores, fallback, prompts, memória, moderação, HTTP/SSE | `npm test` | 46/46 |
 | Typecheck shared + API + app | `npm run typecheck` | ok |
 | Build da API e export web do app | `npm run build:api`, `build:web` | ok |
@@ -37,7 +39,7 @@ Atualizado em 06/11/2026 · versão 1.0.0
 
 ## Pendente / limitações conhecidas
 
-- **Teste ponta a ponta com credenciais reais** ainda não foi feito neste ambiente (sem projeto Supabase nem chaves de IA). Depois do setup: crie conta, crie um personagem com IA, converse, edite, apague, veja memórias, rode `npm run eval`.
+- **Teste ponta a ponta com IA real** ainda não foi feito (faltam chaves de IA). O banco real já foi testado. Depois do setup: crie conta, crie um personagem com IA, converse, edite, apague, veja memórias, rode `npm run eval`.
 - **Builds nativos** (EAS) não foram gerados aqui: exigem conta Expo. O app compila e roda na web; Android/iOS usam o mesmo código.
 - **Push notifications:** só notificações dentro do app. Para push: `expo-notifications` + tabela de tokens.
 - **Painel de moderação:** denúncias são revisadas pelo painel do Supabase (SQL em `SETUP.md`). Um painel web de admin é o próximo passo natural.
@@ -67,7 +69,7 @@ Funções principais: `discover_characters`, `recommend_characters`, `conversati
 
 | Integração | Variáveis | Estado |
 |---|---|---|
-| Supabase (banco, auth, storage) | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EXPO_PUBLIC_SUPABASE_*` | implementado, aguardando credenciais |
+| Supabase (banco, auth, storage) | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EXPO_PUBLIC_SUPABASE_*` | **projeto criado e migrado** (`luqxzunlenpsjmfqxfxi`, São Paulo); falta configurar URLs de auth e colocar as chaves nos `.env` |
 | Anthropic | `ANTHROPIC_API_KEY` | implementado (streaming, visão, cache de prompt) |
 | OpenAI | `OPENAI_API_KEY` | implementado (embeddings, moderação, chat opcional) |
 | Compatível com OpenAI | `COMPAT_API_KEY`, `COMPAT_BASE_URL` | implementado |

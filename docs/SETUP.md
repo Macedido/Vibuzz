@@ -82,6 +82,12 @@ npm run build:web -w @vibuzz/mobile     # gera apps/mobile/dist (site estático)
 ```
 Publique `dist/` em Vercel, Netlify ou Cloudflare Pages com fallback de SPA para `index.html`.
 
+**GitHub Pages:** o workflow `.github/workflows/deploy-pages.yml` já publica em `https://<usuário>.github.io/<repo>/` a cada push na `main`.
+1. *Settings → Pages → Source*: **GitHub Actions** (não “Deploy from a branch”, que só mostra o README).
+2. Quando a API estiver no ar: *Settings → Secrets and variables → Actions → Variables* → `API_URL` = URL da API.
+3. No Supabase, em *Redirect URLs*, adicione `https://<usuário>.github.io/<repo>/**`; na API, inclua `https://<usuário>.github.io` em `CORS_ORIGINS`.
+4. Envie o repositório com `git push` (o upload pelo site do GitHub ignora pastas com ponto, como `.github`).
+
 ### Android e iOS (EAS)
 
 ```bash
