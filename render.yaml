@@ -1,0 +1,24 @@
+# One-click deploy of the API on Render (https://render.com/docs/blueprint-spec).
+# Fill the secret env vars in the Render dashboard after creating the blueprint.
+services:
+  - type: web
+    name: vibuzz-api
+    runtime: docker
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: .
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: WORKER_ENABLED
+        value: "true"
