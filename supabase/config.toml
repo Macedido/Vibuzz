@@ -1,0 +1,20 @@
+# Minimal Supabase CLI config. Run `supabase link --project-ref <ref>` then `supabase db push`.
+project_id = "vibuzz"
+
+[api]
+schemas = ["public", "storage"]
+max_rows = 1000
+
+[db]
+major_version = 17
+
+[auth]
+site_url = "vibuzz://"
+additional_redirect_urls = ["vibuzz://", "vibuzz://reset-password", "exp://**", "http://localhost:8081/**"]
+minimum_password_length = 8
+
+[auth.email]
+enable_confirmations = true
+
+[storage]
+file_size_limit = "10MiB"

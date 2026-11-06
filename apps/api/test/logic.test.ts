@@ -1,0 +1,123 @@
+import { characterSheetSchema } from '@vibuzz/shared';
+import { describe, expect, it } from 'vitest';
+import { extractJson } from '../src/lib/json';
+import { policyViolations, slugifyTag } from '../src/modules/characters/service';
+import { fillPlaceholders } from '../src/modules/conversations/service';
+import { cleanReply } from '../src/modules/intelligence/engine';
+import { currentScene } from '../src/modules/intelligence/scene';
+import { backoffSeconds } from '../src/modules/jobs/worker';
+import { cosine, extractionSchema, isDuplicate, jaccard, nextSummaryChunk, parseVector, resolveSources } from '../src/modules/memory/logic';
+import { decide, normalizeProviderCategories } from '../src/modules/moderation/service';
+import { pickSubject } from '../src/modules/vision/service';
+
+describe('extractJson', () => {
+  it('finds JSON inside prose and fences, respecting strings', () => {
+    expect(extractJson('Claro! ```json\n{"a": "x}y", "b": [1,2]}\n``` pronto')).toEqual({ a: 'x}y', b: [1, 2] });
+    expect(extractJson('resultado: {"ok": true} fim')).toEqual({ ok: true });
+    expect(() => extractJson('sem json')).toThrow();
+  });
+});
+
+describe('memory logic', () => {
+  it('detects duplicates by embedding or word overlap', () => {
+    expect(cosine([1, 0], [1, 0])).toBe(1);
+    expect(isDuplicate({ content: 'a', embedding: [1, 0] }, { content: 'b', embedding: [0.99, 0.01] })).toBe(true);
+    expect(isDuplicate({ content: 'a', embedding: [1, 0] }, { content: 'b', embedding: [0, 1] })).toBe(false);
+    expect(isDuplicate({ content: 'Ana adora dias de chuva' }, { content: 'Ana adora dias de chuva!' })).toBe(true);
+    expect(jaccard('Ana gosta de café', 'Pedro odeia futebol')).toBe(0);
+    expect(isDuplicate({ content: 'x' }, { content: 'y', similarity: 0.95 })).toBe(true);
+  });
+
+  it('maps message numbers to ids and ignores hallucinated ones', () => {
+    expect(resolveSources([1, 3, 3, 9], ['a', 'b', 'c'])).toEqual(['a', 'c']);
+  });
+
+  it('chooses summary chunks outside the recent window', () => {
+    const path = Array.from({ length: 70 }, (_, i) => ({ id: String(i) }));
+    const chunk = nextSummaryChunk(path, -1);
+    expect(chunk[0].id).toBe('0');
+    expect(chunk.length).toBe(40);
+    expect(nextSummaryChunk(path, 39)).toEqual([]); // 40..45 → too small
+    expect(nextSummaryChunk(path.slice(0, 30), -1)).toEqual([]);
+  });
+
+  it('validates extraction output', () => {
+    const out = extractionSchema.parse({ create: [{ category: 'personal', content: 'Ana tem 20 anos', sources: [1] }] });
+    expect(out.create[0]).toMatchObject({ importance: 0.5, holder: null });
+    expect(() => extractionSchema.parse({ create: [{ category: 'inventada', content: 'x y z', sources: [] }] })).toThrow();
+  });
+
+  it('parses pgvector strings', () => {
+    expect(parseVector('[1,2.5]')).toEqual([1, 2.5]);
+    expect(parseVector(null)).toBeNull();
+  });
+});
+
+describe('moderation policy', () => {
+  it('is strict for public content and lenient for private fiction', () => {
+    expect(decide(['violence_graphic'], 'chat').allowed).toBe(true);
+    expect(decide(['violence_graphic'], 'profile').allowed).toBe(false);
+    expect(decide(['sexual_minors'], 'chat').allowed).toBe(false);
+    expect(decide(['sexual_explicit'], 'character').allowed).toBe(false);
+    const crisis = decide(['self_harm_intent'], 'chat');
+    expect(crisis).toMatchObject({ allowed: true, crisis: true });
+  });
+  it('normalises provider categories', () => {
+    expect(normalizeProviderCategories(['sexual/minors', 'self-harm/intent', 'harassment'])).toEqual(['sexual_minors', 'self_harm_intent']);
+  });
+});
+
+describe('character rules', () => {
+  it('blocks minors in romance or mature ratings', () => {
+    const teen = characterSheetSchema.parse({ name: 'Bia', age: '15' });
+    expect(policyViolations({ sheet: teen, members: [], maturity: 'general', categorySlug: 'romance' })).toHaveLength(1);
+    expect(policyViolations({ sheet: teen, members: [], maturity: 'mature' })).toHaveLength(1);
+    const adult = characterSheetSchema.parse({ name: 'Kael', age: '20' });
+    expect(policyViolations({ sheet: adult, members: [teen], maturity: 'general', categorySlug: 'romance' })).toHaveLength(1);
+    expect(policyViolations({ sheet: adult, members: [], maturity: 'mature', categorySlug: 'romance' })).toEqual([]);
+  });
+  it('slugifies tags', () => {
+    expect(slugifyTag('  Ficção Científica!! ')).toBe('ficcao-cientifica');
+  });
+});
+
+describe('chat helpers', () => {
+  it('fills {{user}} and {{char}}', () => {
+    expect(fillPlaceholders('Oi {{user}}, sou {{ char }}.', 'Ana', 'Kael')).toBe('Oi Ana, sou Kael.');
+  });
+  it('strips speaker prefixes in group replies', () => {
+    expect(cleanReply('Marina: Você sempre quer ficar em casa!', 'Marina')).toBe('Você sempre quer ficar em casa!');
+    expect(cleanReply('[Marina]: oi', 'Marina')).toBe('oi');
+    expect(cleanReply('Marina gosta disso.', 'Marina')).toBe('Marina gosta disso.');
+  });
+  it('finds the latest scene on a path', () => {
+    const s = { location: 'a', present: [], objectives: [], items: [], dangers: [], situation: '', recentEvents: [] };
+    expect(currentScene([{ scene_state: s }, { scene_state: null }])).toBe(s);
+    expect(currentScene([{ scene_state: null }])).toBeNull();
+  });
+  it('backs off exponentially', () => {
+    expect([1, 2, 3].map(backoffSeconds)).toEqual([10, 20, 40]);
+    expect(backoffSeconds(20)).toBe(3600);
+  });
+});
+
+describe('vision subject picking', () => {
+  const analysis = {
+    kind: 'multiple_characters' as const,
+    summary: '',
+    subjects: [
+      { label: 'pessoa 1 (esquerda)', position: '', observable: { hair: 'ruivo', eyes: '', skin: '', build: '', clothing: '', accessories: '', expression: '', style: '', other: '' }, apparentAgeRange: '', notDeterminable: [] },
+      { label: 'pessoa 2 (direita)', position: '', observable: { hair: 'preto', eyes: '', skin: '', build: '', clothing: '', accessories: '', expression: '', style: '', other: '' }, apparentAgeRange: '', notDeterminable: [] },
+    ],
+    scene: { setting: '', elements: [], mood: '', lighting: '' },
+    artStyle: '',
+    needsClarification: true,
+    clarificationQuestion: '',
+    safety: { flagged: false, reason: '', possibleMinor: false },
+  };
+  it('requires a choice when there are several people', () => {
+    expect(pickSubject(analysis)).toBeNull();
+    expect(pickSubject(analysis, 'pessoa 2 (direita)')?.observable.hair).toBe('preto');
+    expect(pickSubject(analysis, 'pessoa 1')?.observable.hair).toBe('ruivo');
+  });
+});
