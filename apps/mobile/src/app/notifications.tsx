@@ -9,8 +9,19 @@ import { timeAgo } from '@/lib/types';
 
 interface Notification {
   id: string;
-  type: 'follow' | 'like' | 'comment' | 'moderation' | 'system';
-  payload: { user_id?: string; character_id?: string; message?: string };
+  type: 'follow' | 'like' | 'comment' | 'moderation' | 'system' | 'message' | 'achievement';
+  payload: {
+    user_id?: string;
+    character_id?: string;
+    message?: string;
+    conversationId?: string;
+    name?: string;
+    preview?: string;
+    photo?: boolean;
+    title?: string;
+    body?: string;
+    code?: string;
+  };
   read_at: string | null;
   created_at: string;
 }
@@ -37,19 +48,40 @@ export default function Notifications() {
   return (
     <Screen refreshControl={<RefreshControl refreshing={q.refreshing} onRefresh={q.refresh} tintColor={colors.accent} />}>
       {!q.data.rows.length ? (
-        <EmptyState icon="notifications-outline" title="Tudo em dia" message="Novos seguidores e comentários aparecem aqui." />
+        <EmptyState icon="notifications-outline" title="Tudo em dia" message="Mensagens dos personagens, seguidores, comentários e conquistas aparecem aqui." />
       ) : (
         q.data.rows.map((n) => {
-          const who = n.payload.user_id ? `@${q.data!.names.get(n.payload.user_id) ?? 'alguém'}` : '';
-          const title = n.type === 'follow' ? `${who} começou a seguir você` : n.type === 'comment' ? `${who} comentou no seu personagem` : n.payload.message ?? 'Aviso do Vibuzz';
+          const p = n.payload;
+          const who = p.user_id ? `@${q.data!.names.get(p.user_id) ?? 'alguém'}` : '';
+          const title =
+            n.type === 'follow'
+              ? `${who} começou a seguir você`
+              : n.type === 'comment'
+                ? `${who} comentou no seu personagem`
+                : n.type === 'message'
+                  ? `${p.name ?? 'Um personagem'} mandou ${p.photo ? 'uma foto' : 'mensagem'}`
+                  : n.type === 'achievement'
+                    ? `Conquista desbloqueada: ${p.title ?? ''}`
+                    : p.title ?? p.message ?? 'Aviso do Vibuzz';
+          const sub = n.type === 'message' && p.preview ? `“${p.preview}” · ${timeAgo(n.created_at)}` : n.type === 'system' && p.body ? `${p.body} · ${timeAgo(n.created_at)}` : timeAgo(n.created_at);
+          const icon =
+            n.type === 'follow' ? 'person-add-outline' : n.type === 'comment' ? 'chatbubble-outline' : n.type === 'message' ? 'sparkles-outline' : n.type === 'achievement' ? 'trophy-outline' : 'information-circle-outline';
           return (
             <View key={n.id} style={{ opacity: n.read_at ? 0.7 : 1 }}>
               <ListItem
-                icon={n.type === 'follow' ? 'person-add-outline' : n.type === 'comment' ? 'chatbubble-outline' : 'information-circle-outline'}
+                icon={icon}
                 title={title}
-                subtitle={timeAgo(n.created_at)}
+                subtitle={sub}
                 onPress={() =>
-                  n.payload.character_id ? router.push(`/character/${n.payload.character_id}`) : n.payload.user_id ? router.push(`/user/${n.payload.user_id}`) : undefined
+                  n.type === 'message' && p.conversationId
+                    ? router.push(`/chat/${p.conversationId}`)
+                    : n.type === 'achievement'
+                      ? router.push('/achievements')
+                      : p.character_id
+                        ? router.push(`/character/${p.character_id}`)
+                        : p.user_id
+                          ? router.push(`/user/${p.user_id}`)
+                          : undefined
                 }
                 right={!n.read_at ? <Ionicons name="ellipse" size={8} color={colors.accent} /> : <Text style={type.small} />}
               />

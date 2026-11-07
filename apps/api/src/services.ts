@@ -1,3 +1,4 @@
+import { PLAN_LIMITS } from '@vibuzz/shared';
 import type { Env } from './config';
 import { createAdminClient, type Db } from './lib/db';
 import type { Logger } from './lib/log';
@@ -8,6 +9,8 @@ import { Repo } from './modules/conversations/repo';
 import { ConversationService } from './modules/conversations/service';
 import { CreatorService } from './modules/creator/service';
 import { ImageService } from './modules/images/service';
+import { LifeService } from './modules/life/service';
+import { PushService } from './modules/push/service';
 import { IntelligenceEngine } from './modules/intelligence/engine';
 import { SceneService } from './modules/intelligence/scene';
 import { JobWorker } from './modules/jobs/worker';
@@ -30,6 +33,8 @@ export interface Services {
   characters: CharacterService;
   creator: CreatorService;
   images: ImageService;
+  push: PushService;
+  life: LifeService;
   worker: JobWorker;
   flushUsage: () => Promise<void>;
   maintenance: () => Promise<void>;
@@ -93,11 +98,15 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
   const vision = new VisionService(ai);
   const memory = new MemoryService(repo, ai);
   const scene = new SceneService(repo, ai);
-  const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages);
+  const images = new ImageService(ai, db, { baseUrl: env.POLLINATIONS_IMAGE_URL });
+  const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages, env.IMAGE_GEN === false ? undefined : images, (premium) =>
+    PLAN_LIMITS[premium ? 'premium' : 'free'].imagesPerDay,
+  );
+  const push = new PushService(db, log);
+  const life = new LifeService(repo, engine, push, log, env.SUPABASE_URL);
   const conversations = new ConversationService(env, repo, engine, memory, moderation, vision, storage);
   const characters = new CharacterService(repo, moderation, storage, ai);
   const creator = new CreatorService(ai, vision, storage);
-  const images = new ImageService(ai, db, { baseUrl: env.POLLINATIONS_IMAGE_URL });
 
   const maintenance = async () => {
     const purged = await conversations.maintenancePurge();
@@ -139,6 +148,8 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
     characters,
     creator,
     images,
+    push,
+    life,
     worker,
     flushUsage: usage.flush,
     maintenance: () => worker.maybeMaintain(),

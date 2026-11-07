@@ -8,6 +8,7 @@ export interface Draft {
   avatarPath?: string | null;
   imagePaths?: string[];
   notes?: string[];
+  tags?: string[];
 }
 
 let pending: Draft | null = null;

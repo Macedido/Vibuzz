@@ -2,11 +2,11 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { CharacterGrid } from '@/components/character-card';
-import { ActionSheet, Avatar, Button, Card, EmptyState, ErrorState, IconButton, Loading, Row, Screen, Section } from '@/components/ui';
+import { ActionSheet, Avatar, Button, Card, EmptyState, ErrorState, IconButton, Ionicons, ListItem, Loading, Row, Screen, Section } from '@/components/ui';
 import { useAuth, type Profile } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { space, type } from '@/lib/theme';
+import { colors, space, type } from '@/lib/theme';
 import { compact, type CharacterCard } from '@/lib/types';
 
 export default function UserPage() {
@@ -17,17 +17,26 @@ export default function UserPage() {
   const q = useQuery(async () => {
     const profile = unwrap(await supabase.from('user_profiles').select('*').eq('id', id).maybeSingle()) as Profile | null;
     if (!profile) throw new Error('Perfil indisponível.');
-    const [chars, follow, blocked] = await Promise.all([
+    const [chars, cols, badges, follow, blocked] = await Promise.all([
       supabase.rpc('discover_characters', { p_creator: id, p_sort: 'recent', p_limit: 50 }),
+      supabase.from('collections').select('id, name, item_count').eq('owner_id', id).eq('is_public', true).gt('item_count', 0).order('updated_at', { ascending: false }).limit(12),
+      supabase.from('user_achievements').select('code', { count: 'exact', head: true }).eq('user_id', id),
       supabase.from('follows').select('follower_id').eq('follower_id', userId!).eq('following_id', id).maybeSingle(),
       supabase.from('blocks').select('blocked_id').eq('blocker_id', userId!).eq('blocked_id', id).maybeSingle(),
     ]);
-    return { profile, characters: (unwrap(chars) as CharacterCard[]) ?? [], following: Boolean(follow.data), blocked: Boolean(blocked.data) };
+    return {
+      profile,
+      characters: (unwrap(chars) as CharacterCard[]) ?? [],
+      collections: (cols.data as { id: string; name: string; item_count: number }[] | null) ?? [],
+      badges: badges.count ?? 0,
+      following: Boolean(follow.data),
+      blocked: Boolean(blocked.data),
+    };
   }, [id, userId]);
 
   if (q.loading) return <Loading />;
   if (q.error || !q.data) return <ErrorState message={q.error ?? 'Erro'} onRetry={q.refresh} />;
-  const { profile, characters, following, blocked } = q.data;
+  const { profile, characters, collections, badges, following, blocked } = q.data;
   const me = id === userId;
 
   const toggleFollow = async () => {
@@ -79,7 +88,22 @@ export default function UserPage() {
         ) : (
           <Button title="Editar perfil" variant="secondary" onPress={() => router.push('/edit-profile')} style={{ marginTop: space.md }} />
         )}
+        {badges ? (
+          <Row gap={6} style={{ marginTop: space.md }}>
+            <Ionicons name="trophy" size={14} color={colors.signal} />
+            <Text style={[type.small, { color: colors.textSoft }]} onPress={() => router.push({ pathname: '/achievements', params: { user: id } })}>
+              {badges} {badges === 1 ? 'conquista' : 'conquistas'}
+            </Text>
+          </Row>
+        ) : null}
         <Section title="Personagens">{characters.length ? <CharacterGrid items={characters} /> : <EmptyState title="Nenhum personagem público" />}</Section>
+        {collections.length ? (
+          <Section title="Coleções">
+            {collections.map((c) => (
+              <ListItem key={c.id} icon="albums-outline" title={c.name} subtitle={`${c.item_count} ${c.item_count === 1 ? 'personagem' : 'personagens'}`} onPress={() => router.push(`/collection/${c.id}`)} />
+            ))}
+          </Section>
+        ) : null}
       </View>
       <ActionSheet
         visible={menu}

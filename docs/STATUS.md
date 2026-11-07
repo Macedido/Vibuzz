@@ -1,14 +1,27 @@
 # Status do projeto
 
-Atualizado em 06/11/2026 · versão 1.1.0
+Atualizado em 07/11/2026 · versão 1.2.0
+
+## Novidades da v2 (07/11/2026)
+
+- **Vida própria:** por conversa, “Desligado / Às vezes / Sempre”; o personagem manda mensagem sozinho (8h–22h no fuso do usuário, limite por plano), pode mandar foto junto e avisa por notificação. Precisa do usuário ligar “Mensagens espontâneas”.
+- **Fotos:** o personagem manda foto quando pedem ou por conta própria (`[foto: …]` → Pollinations, grátis); galeria por conversa.
+- **Emoções e relação:** cada resposta ganha uma emoção; medidores de amizade, confiança, intimidade e rivalidade + linha do tempo (tela “Relação”).
+- **Voz:** ouvir respostas, voz por personagem (gênero, tom, velocidade) e chamada de voz (navegador com reconhecimento de fala e app Android).
+- **Notificações reais:** Web Push (VAPID próprio, sem serviço pago) no navegador/site instalado; no APK, checagem em segundo plano (~15 min) com notificação local, sem Firebase.
+- **Social:** Top da semana (conversas + curtidas de 7 dias), coleções públicas/privadas, conquistas com progresso, coleções e conquistas no perfil público.
+- **Tradução** de mensagens (cache por idioma) e idioma da conversa; **importação** de fichas (Character Card V1/V2/V3 em .json/.png, ou texto livre organizado pela IA).
+- **Modo privado** (coleções somem do perfil e a atividade não entra no ranking); **Premium** com comparação honesta e lista de espera (sem cobrança); limites por plano aplicados no servidor (fotos/dia, mensagens espontâneas, personagens privados, lembranças por resposta).
+- **Login com Google** (botão aparece quando o provedor está ligado no Supabase) + etapa de data de nascimento; **Gemini nativo** (chaves `AIza…` e `AQ.…`).
+- **APK** gerado pelo GitHub Actions (`android-apk.yml`) e publicado em Releases; **PWA** instalável com ícones da nova marca.
 
 ## Funcionalidades concluídas
 
 **Fundação** — monorepo (npm workspaces), app Expo SDK 58 com Expo Router e TypeScript, identidade visual própria (tema escuro, verde-ácido + lilás, ícones gerados), navegação com 5 abas, API modular (Hono), Supabase com 10 migrations, login/cadastro com idade mínima, recuperação de senha, perfis.
 
-**Personagens** — ficha estruturada (nome, gênero, idade, frase, aparência, biografia, personalidade, passado, fala, gostos, desgostos, medos, objetivos, hábitos, comportamentos, relações, universo, cenário, primeira mensagem, instruções); nada obrigatório além do nome; avatar e galeria; categorias e tags; público / por link / privado; classificação Livre / 13+ / 18+; versões imutáveis com prévia das mudanças e restauração; página do personagem; apagar (ou despublicar se outros conversam com ele).
+**Personagens** — dois tipos: **personagem** (a IA é ele) ou **história** (a IA narra e dá voz a todo o elenco, e o usuário interpreta o papel definido em “Seu papel na história”, como em cards de cenário); ficha estruturada (nome, gênero, idade, frase, aparência, biografia, personalidade, passado, fala, gostos, desgostos, medos, objetivos, hábitos, comportamentos, relações, universo, cenário, primeira mensagem, instruções); nada obrigatório além do nome; avatar e galeria; categorias e tags; público / por link / privado; classificação Livre / 13+ / 18+; versões imutáveis com prévia das mudanças e restauração; página do personagem; apagar (ou despublicar se outros conversam com ele).
 
-**Criação com IA** — ideia em texto + até 4 imagens → ficha estruturada que não contradiz o criador; grupos inteiros; regenerar campo a campo; visão distingue 1 personagem / vários / cenário / sem referência / ambígua, separa traços de cada pessoa, pergunta qual pessoa usar e separa o observável do que não dá para saber.
+**Criação com IA** — ideia em texto + até 4 imagens → ficha estruturada que não contradiz o criador; detecta quando a ideia é uma história em que o usuário tem um papel (“você é…”) e cria no modo história; grupos inteiros; regenerar campo a campo; visão distingue 1 personagem / vários / cenário / sem referência / ambígua, separa traços de cada pessoa, pergunta qual pessoa usar e separa o observável do que não dá para saber.
 
 **Motor de IA** — contexto completo por resposta, prompt com parte cacheável, proteção contra injeção, 3 níveis automáticos, fallback entre provedores e modelos, remoção automática de parâmetros não suportados, custo e latência registrados, mensagens claras quando algo não está configurado (`/v1/status`).
 
@@ -30,10 +43,10 @@ Atualizado em 06/11/2026 · versão 1.1.0
 
 | Suíte | Comando | Resultado |
 |---|---|---|
-| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 77/77 |
+| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 105/105 |
 | Banco real no Supabase (projeto `Vibuzz`, sa-east-1): cadastro, idade mínima, RLS, busca, curtidas — em transação desfeita | SQL | ok |
 | Supabase Security Advisor | painel | só avisos esperados (`is_username_available`, `conversation_path`, tabelas só do servidor) |
-| API: provedores, fallback, prompts, memória, moderação, HTTP/SSE, IA grátis, edge | `npm test` | 56/56 |
+| API: provedores (inclui Gemini), fallback, prompts, memória, moderação, vida própria, push, HTTP/SSE, edge | `npm test` | 70/70 |
 | Pacote edge rodando em Deno 2 (health, status, CORS, auth, tick) | `deno run` | ok |
 | Typecheck shared + API + app | `npm run typecheck` | ok |
 | Build da API e export web do app | `npm run build:api`, `build:web` | ok |
@@ -46,10 +59,10 @@ Atualizado em 06/11/2026 · versão 1.1.0
 - **Builds nativos** (EAS) não foram gerados aqui: exigem conta Expo. O app compila e roda na web; Android/iOS usam o mesmo código.
 - **IA gratuita sem chave** é limitada (≈2 pedidos/min por modelo e por IP, qualidade média, às vezes lenta). Serve para testar e para poucos usuários; para lançar, adicione `GEMINI_API_KEY` (grátis) ou uma chave paga.
 - No modo grátis, mensagens privadas não passam pelo classificador de IA (para não gastar o limite): valem as regras no prompt + triagem local de menores e de crise. Conteúdo público (fichas, perfis, comentários, imagens públicas) continua sempre moderado.
-- **Push notifications:** só notificações dentro do app. Para push: `expo-notifications` + tabela de tokens.
+- **Notificações no APK** chegam pela checagem em segundo plano (o Android decide o intervalo, ~15 min). Push instantâneo no app nativo exigiria Firebase (FCM).
+- **iPhone:** Web Push só funciona com o site adicionado à Tela de Início (iOS 16.4+).
 - **Painel de moderação:** denúncias são revisadas pelo painel do Supabase (SQL em `SETUP.md`). Um painel web de admin é o próximo passo natural.
-- **Personagens com vida própria:** arquitetura pronta (preferência, fila agendada, notificações); a geração dos acontecimentos ainda não foi implementada.
-- **Billing:** fora do escopo (módulo futuro). `usage_records` já guarda custo por usuário.
+- **Pagamentos:** o Premium ainda não cobra (lista de espera). Para ativar alguém: `update users set plan = 'premium', premium_until = now() + interval '30 days' where id = '…'`.
 - **Recomendações** usam gosto por categoria/tag, embeddings e seguidos; sem modelo treinado.
 - Limite por minuto é por instância (memória); o limite diário fica no banco.
 

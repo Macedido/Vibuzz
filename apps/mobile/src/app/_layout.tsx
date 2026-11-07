@@ -8,6 +8,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Banner } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { checkNotifications, onNotificationTap } from '@/lib/native-notify';
+import { setupPwa } from '@/lib/pwa';
 import { missingConfig } from '@/lib/config';
 import { supabase } from '@/lib/supabase';
 import { colors, space, type } from '@/lib/theme';
@@ -41,7 +43,7 @@ function useAuthLinks() {
 }
 
 function Gate() {
-  const { ready, session } = useAuth();
+  const { ready, session, account } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   useAuthLinks();
@@ -52,8 +54,16 @@ function Gate() {
     const inAuth = segments[0] === '(auth)';
     const publicRoutes = ['legal', 'reset-password'];
     if (!session && !inAuth && !publicRoutes.includes(segments[0] ?? '')) router.replace('/welcome');
+    else if (session && account && !account.birthdate && segments[0] !== 'complete-signup') router.replace('/complete-signup');
     else if (session && inAuth) router.replace('/');
-  }, [ready, session, segments, router]);
+  }, [ready, session, account, segments, router]);
+
+  useEffect(() => setupPwa(), []);
+  useEffect(() => onNotificationTap((url) => router.push(url as never)), [router]);
+  useEffect(() => {
+    // App opened: show what arrived while it was closed (native only; no-op on web).
+    if (session) void checkNotifications().catch(() => {});
+  }, [session]);
 
   return (
     <Stack
@@ -73,6 +83,13 @@ function Gate() {
       <Stack.Screen name="character/[id]" options={{ title: '' }} />
       <Stack.Screen name="chat/[id]" options={{ title: '' }} />
       <Stack.Screen name="memories/[id]" options={{ title: 'Memórias' }} />
+      <Stack.Screen name="gallery/[id]" options={{ title: 'Galeria' }} />
+      <Stack.Screen name="relationship/[id]" options={{ title: 'Relação' }} />
+      <Stack.Screen name="collection/[id]" options={{ title: 'Coleção' }} />
+      <Stack.Screen name="achievements" options={{ title: 'Conquistas' }} />
+      <Stack.Screen name="premium" options={{ title: 'Vibuzz Premium' }} />
+      <Stack.Screen name="complete-signup" options={{ title: 'Quase lá', headerBackVisible: false }} />
+      <Stack.Screen name="create/import" options={{ title: 'Importar personagem' }} />
       <Stack.Screen name="create/editor" options={{ title: 'Personagem' }} />
       <Stack.Screen name="create/ai" options={{ title: 'Criar com IA' }} />
       <Stack.Screen name="personas/index" options={{ title: 'Personas' }} />

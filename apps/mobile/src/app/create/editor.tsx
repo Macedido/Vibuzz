@@ -38,7 +38,10 @@ import { mediaUrl } from '@/lib/supabase';
 import { colors, radius, space, type } from '@/lib/theme';
 import { timeAgo } from '@/lib/types';
 import { pickImage, uploadImage } from '@/lib/upload';
+import { speak } from '@/lib/voice';
 
+const VOICE_PITCH: [string, number][] = [['Grave', 0.8], ['Tom normal', 1], ['Aguda', 1.25]];
+const VOICE_RATE: [string, number][] = [['Devagar', 0.85], ['Ritmo normal', 1], ['Rápida', 1.2]];
 const PORTRAIT_LABELS: Record<(typeof PORTRAIT_STYLE_IDS)[number], string> = { anime: 'Anime', realista: 'Realista', '3d': '3D', fantasia: 'Fantasia' };
 
 type SheetKey = keyof CharacterSheet;
@@ -124,6 +127,7 @@ export default function Editor() {
       setAvatarPath(draft.avatarPath ?? null);
       setGallery(draft.imagePaths ?? []);
       setNotes(draft.notes ?? []);
+      if (draft.tags?.length) setTags(draft.tags.join(', '));
       setOpen({ Identidade: true, 'Voz e comportamento': true, 'Mundo e início': true });
     }
     if (!editingId) return;
@@ -347,6 +351,29 @@ export default function Editor() {
                   ? 'A IA narra e dá voz a todos os personagens. Você interpreta o papel descrito em “Seu papel na história” (em Mundo e início).'
                   : 'A IA vira este personagem e conversa com você.'}
               </Text>
+            </View>
+          ) : null}
+          {kind === 'single' ? (
+            <View style={{ marginBottom: space.md }}>
+              <Text style={[type.tiny, { marginBottom: space.sm }]}>Voz</Text>
+              <Segmented
+                value={sheet.voice?.gender ?? 'auto'}
+                onChange={(g) => setSheet((s) => ({ ...s, voice: { ...s.voice, gender: g } }))}
+                options={[
+                  { value: 'auto', label: 'Automática' },
+                  { value: 'feminina', label: 'Feminina' },
+                  { value: 'masculina', label: 'Masculina' },
+                ]}
+              />
+              <Row gap={space.xs} style={{ marginTop: space.sm, flexWrap: 'wrap' }}>
+                {VOICE_PITCH.map(([label, v]) => (
+                  <Chip key={label} label={label} active={Math.abs((sheet.voice?.pitch ?? 1) - v) < 0.05} onPress={() => setSheet((s) => ({ ...s, voice: { ...s.voice, pitch: v } }))} />
+                ))}
+                {VOICE_RATE.map(([label, v]) => (
+                  <Chip key={label} label={label} active={Math.abs((sheet.voice?.rate ?? 1) - v) < 0.05} onPress={() => setSheet((s) => ({ ...s, voice: { ...s.voice, rate: v } }))} />
+                ))}
+                <Chip label="Ouvir" icon="volume-high-outline" onPress={() => void speak(sheet.firstMessage || `Oi, eu sou ${sheet.name || 'seu personagem'}.`, { characterId: editingId ?? sheet.name, style: sheet.voice })} />
+              </Row>
             </View>
           ) : null}
           {kind === 'single' && sheet.mode !== 'narrator' ? (

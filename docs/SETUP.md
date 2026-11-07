@@ -59,6 +59,13 @@ update private.settings set value = 'https://<ref>.supabase.co/functions/v1/vibu
 ```
 URL da API para o app: `https://<ref>.supabase.co/functions/v1/vibuzz-api`.
 
+**Sem instalar nada:** o workflow `.github/workflows/edge-bundle.yml` roda os testes, refaz o `bundle.js` e faz commit dele a cada mudança em `apps/api/src` ou `packages/shared/src`. A função publicada pode então só importar o bundle de um commit fixo:
+```ts
+// index.ts da função no Supabase
+import 'https://raw.githubusercontent.com/<usuário>/<repo>/<commit>/supabase/functions/vibuzz-api/bundle.js';
+```
+Para atualizar a API, troque o `<commit>` pelo commit do bot ("Rebuild edge bundle…") e reimplante a função com o mesmo `deno.json`.
+
 **Melhorar a IA (grátis):** crie uma chave em [aistudio.google.com/apikey](https://aistudio.google.com/apikey) e adicione `GEMINI_API_KEY` em *Supabase → Edge Functions → Secrets*. Não precisa reimplantar. A IA gratuita sem chave continua como reserva.
 
 ## 3b. API em servidor Node (`apps/api`)

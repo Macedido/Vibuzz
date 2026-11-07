@@ -1,30 +1,33 @@
 import { Platform } from 'react-native';
 
-/** Vibuzz design tokens — ink background, acid-lime accent, lilac signal. */
+/** Vibuzz design tokens — deep-night background, electric-blue brand from the logo, cyan signal. */
 export const colors = {
-  bg: '#0A0A0F',
-  surface: '#12121A',
-  raised: '#1A1A25',
-  overlay: '#22222F',
-  border: '#2A2A38',
-  borderSoft: '#1F1F2B',
-  text: '#F3F3F7',
-  textSoft: '#C9C9D6',
-  muted: '#8C8CA1',
-  faint: '#5C5C70',
-  accent: '#C8FF4D',
-  accentInk: '#0A0A0F',
-  accentSoft: 'rgba(200,255,77,0.12)',
-  signal: '#9D8CFF',
-  signalSoft: 'rgba(157,140,255,0.14)',
+  bg: '#03041A',
+  surface: '#0A0D26',
+  raised: '#121738',
+  overlay: '#1A2148',
+  border: '#232C57',
+  borderSoft: '#161C40',
+  text: '#F2F5FF',
+  textSoft: '#C4CBEA',
+  muted: '#8890B8',
+  faint: '#545E8C',
+  accent: '#2A7DFF',
+  accentInk: '#FFFFFF',
+  accentSoft: 'rgba(42,125,255,0.16)',
+  signal: '#46D5FF',
+  signalSoft: 'rgba(70,213,255,0.14)',
   danger: '#FF5C7A',
   dangerSoft: 'rgba(255,92,122,0.12)',
-  success: '#4ADE80',
+  success: '#3DDC97',
   warning: '#FFC857',
-  userBubble: '#C8FF4D',
-  userBubbleText: '#0A0A0F',
-  botBubble: '#181823',
+  userBubble: '#1F63F2',
+  userBubbleText: '#FFFFFF',
+  botBubble: '#0F1330',
 } as const;
+
+/** Brand gradient (logo: deep blue -> sky -> cyan). */
+export const brandGradient = ['#1340FF', '#2A8CFF', '#4FDCFF'] as const;
 
 export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;

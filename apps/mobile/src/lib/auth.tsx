@@ -15,9 +15,15 @@ export interface Profile {
 
 export interface Account {
   id: string;
-  birthdate: string;
+  /** Null right after a Google sign-up, until the age step. */
+  birthdate: string | null;
   allow_mature: boolean;
   spontaneous_messages: boolean;
+  voice_enabled?: boolean;
+  timezone?: string;
+  plan?: 'free' | 'premium';
+  premium_waitlist?: boolean;
+  private_mode?: boolean;
   role: string;
   status: string;
 }
@@ -61,7 +67,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       supabase.from('users').select('*').eq('id', s.user.id).maybeSingle(),
     ]);
     setProfile((p.data as Profile) ?? null);
-    setAccount((a.data as Account) ?? null);
+    const acc = (a.data as Account) ?? null;
+    setAccount(acc);
+    // Spontaneous messages respect the user's waking hours: keep the timezone current.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (acc && tz && acc.timezone !== tz) void supabase.from('users').update({ timezone: tz }).eq('id', acc.id);
   }, []);
 
   useEffect(() => {
@@ -89,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       userId: session?.user.id ?? null,
       profile,
       account,
-      isAdult: account ? ageOf(account.birthdate) >= 18 : false,
+      isAdult: account?.birthdate ? ageOf(account.birthdate) >= 18 : false,
       refresh: () => load(session),
       signOut: async () => {
         await supabase.auth.signOut();

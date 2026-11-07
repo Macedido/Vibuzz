@@ -1,6 +1,6 @@
-import { characterUpsertSchema, diffSheets, type CharacterSheet, type CharacterUpsert } from '@vibuzz/shared';
+import { characterUpsertSchema, diffSheets, PLAN_LIMITS, type CharacterSheet, type CharacterUpsert } from '@vibuzz/shared';
 import { must, type CharacterRow, type Db } from '../../lib/db';
-import { badRequest, blocked, forbidden, notFound } from '../../lib/errors';
+import { AppError, badRequest, blocked, forbidden, notFound } from '../../lib/errors';
 import { truncate } from '../../lib/json';
 import { assertOwnedPath, type StorageService } from '../../lib/storage';
 import type { AiService } from '../ai/service';
@@ -99,13 +99,27 @@ export class CharacterService {
       tagline: truncate(sheet.tagline || '', 160),
       description: truncate(sheet.biography || sheet.personality || '', 800),
       greeting_preview: truncate(sheet.firstMessage || '', 400),
+      voice: sheet.voice ?? null,
       search_text: truncate([tags.join(' '), sheet.universe, sheet.personality, sheet.scenario, username].filter(Boolean).join(' '), 4000),
     };
   }
 
-  async create(userId: string, raw: CharacterUpsert) {
+/** Private characters per plan (public and unlisted ones are unlimited). */
+  private async assertPrivateRoom(userId: string, excludeId?: string) {
+    const user = await this.repo.user(userId);
+    const max = PLAN_LIMITS[user.isPremium ? 'premium' : 'free'].privateCharacters;
+    let q = this.db.from('characters').select('id', { count: 'exact', head: true }).eq('creator_id', userId).eq('visibility', 'private').neq('kind', 'member').neq('status', 'removed');
+    if (excludeId) q = q.neq('id', excludeId);
+    const { count } = await q;
+    if ((count ?? 0) >= max) {
+      throw new AppError(403, 'plan_limit', `Você chegou ao limite de ${max} personagens privados do seu plano. Publique ou apague algum, ou entre na lista do Premium.`);
+    }
+  }
+
+    async create(userId: string, raw: CharacterUpsert) {
     const input = characterUpsertSchema.parse(raw);
     if (input.kind === 'group' && input.members.length < 2) throw badRequest('Um grupo precisa de pelo menos 2 integrantes.');
+    if (input.visibility === 'private') await this.assertPrivateRoom(userId);
     await this.moderate(userId, input);
     const profile = must(await this.db.from('user_profiles').select('username').eq('id', userId).single(), 'profile') as { username: string };
 
@@ -146,6 +160,7 @@ export class CharacterService {
     const input = characterUpsertSchema.parse({ ...raw, kind: existing.kind });
     if (existing.kind === 'group' && input.members.length < 2) throw badRequest('Um grupo precisa de pelo menos 2 integrantes.');
     await this.moderate(userId, input, id);
+    if (input.visibility === 'private' && existing.visibility !== 'private') await this.assertPrivateRoom(userId, id);
     const profile = must(await this.db.from('user_profiles').select('username').eq('id', userId).single(), 'profile') as { username: string };
 
     let versionId = existing.current_version_id;

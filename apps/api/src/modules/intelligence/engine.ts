@@ -1,12 +1,13 @@
-import type { ApiMessage, StreamEvent } from '@vibuzz/shared';
+import { PLAN_LIMITS, type ApiMessage, type StreamEvent } from '@vibuzz/shared';
 import { z } from 'zod';
 import { MESSAGE_COLUMNS, must, type CharacterWithSheet, type ConversationRow, type MessageRow } from '../../lib/db';
 import { truncate } from '../../lib/json';
 import type { StorageService } from '../../lib/storage';
 import { chooseChatTier, creativityToTemperature, type AiService } from '../ai/service';
 import type { Repo } from '../conversations/repo';
+import type { ImageService } from '../images/service';
 import type { MemoryService } from '../memory/service';
-import { buildSystemPrompt, buildTranscript, type CastMember, type TranscriptMessage } from './prompts';
+import { buildSystemPrompt, buildTranscript, extractPhoto, type CastMember, type TranscriptMessage } from './prompts';
 import { currentScene } from './scene';
 
 export function toApiMessage(m: MessageRow): ApiMessage {
@@ -21,12 +22,14 @@ export function toApiMessage(m: MessageRow): ApiMessage {
     status: m.status,
     is_pinned: m.is_pinned,
     created_at: m.created_at,
+    emotion: (m.emotion as ApiMessage['emotion']) ?? null,
+    is_spontaneous: m.is_spontaneous ?? false,
   };
 }
 
 export interface TurnInput {
   conversation: ConversationRow;
-  viewer: { id: string; isAdult: boolean; allowMature: boolean };
+  viewer: { id: string; isAdult: boolean; allowMature: boolean; isPremium?: boolean };
   /** Message the reply attaches to (usually the user's message). */
   parentId: string;
   crisis?: boolean;
@@ -34,6 +37,8 @@ export interface TurnInput {
   privateTo?: string | null;
   /** Continue an existing assistant message instead of creating a new one. */
   continueMessageId?: string;
+  /** The character writes on its own initiative (no new user message). */
+  proactive?: { idle: string };
   emit: (e: StreamEvent) => void;
   signal: AbortSignal;
 }
@@ -58,6 +63,8 @@ export class IntelligenceEngine {
     private memory: MemoryService,
     private storage: StorageService,
     private chatImagesInline: boolean,
+    private images?: ImageService,
+    private photosPerDay: (premium: boolean) => number = () => 12,
   ) {}
 
   private get db() {
@@ -96,6 +103,10 @@ export class IntelligenceEngine {
       speakers = [{ id: m.speaker_character_id ?? character.id, intent: '' }];
     } else if (!isGroup) {
       speakers = [{ id: character.id, intent: '' }];
+    } else if (input.proactive) {
+      // Life of its own in groups: one or two members bring something up.
+      const shuffled = [...cast].sort(() => Math.random() - 0.5).slice(0, cast.length > 1 && Math.random() < 0.6 ? 2 : 1);
+      speakers = shuffled.map((c, i) => ({ id: c.id, intent: i === 0 ? 'puxa um assunto por conta própria' : 'reage ao que o outro integrante disse' }));
     } else if (input.privateTo && cast.some((c) => c.id === input.privateTo)) {
       speakers = [{ id: input.privateTo, intent: 'responde em particular ao usuário' }];
     } else {
@@ -113,7 +124,7 @@ export class IntelligenceEngine {
       const holderId = isGroup ? sp.id : null;
       const visiblePath = isGroup ? path.filter((m) => !m.audience_character_id || m.audience_character_id === sp.id) : path;
       const pathIds = visiblePath.map((m) => m.id);
-      const ctx = await this.memory.retrieve({ conversationId: conv.id, userId: conv.user_id, holderId, pathIds, query, names });
+      const ctx = await this.memory.retrieve({ conversationId: conv.id, userId: conv.user_id, holderId, pathIds, query, names, limit: PLAN_LIMITS[input.viewer.isPremium ? 'premium' : 'free'].memoryItems });
 
       const castInfo: CastMember[] = cast.map((c) => ({ id: c.id, name: c.name, sheet: c.sheet }));
       const imageNotes = visiblePath
@@ -137,6 +148,8 @@ export class IntelligenceEngine {
         crisis: input.crisis,
         turnIntent: isGroup ? sp.intent : undefined,
         privateWith: input.privateTo ? names.get(input.privateTo) ?? null : hadPrivate ? '' : null,
+        photos: Boolean(this.images) && !input.continueMessageId,
+        language: conv.language ?? null,
       });
 
       const transcriptSource: TranscriptMessage[] = visiblePath.map((m) => ({
@@ -150,7 +163,14 @@ export class IntelligenceEngine {
         images: inlineImages.get(m.id),
       }));
       const messages = buildTranscript(transcriptSource, { voiceId: isGroup ? sp.id : character.id, isGroup, userName, budgetTokens: HISTORY_BUDGET[tier] });
-      if (input.continueMessageId) {
+      if (input.proactive && created.length === 0) {
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg?.role === 'user' && lastMsg.content === '[Continue a cena a partir daqui.]') messages.pop();
+        messages.push({
+          role: 'user',
+          content: `[Sem mensagem nova do usuário: ele está longe há ${input.proactive.idle}. Escreva por iniciativa própria, como uma mensagem que você manda para ele — curta e natural. Puxe algo real da história ou das memórias: uma lembrança de antes, como você se sente sobre o que aconteceu (inclusive se ficou chateado), algo que aconteceu com você nesse tempo, ou uma foto do que está fazendo se fizer sentido. Não cobre resposta e não fale deste aviso.]`,
+        });
+      } else if (input.continueMessageId) {
         // The transcript ends with the reply being continued plus a placeholder user turn; make it explicit.
         messages[messages.length - 1] = {
           role: 'user',
@@ -176,6 +196,7 @@ export class IntelligenceEngine {
               audience_character_id: input.privateTo ?? null,
               content: '',
               status: 'streaming',
+              is_spontaneous: Boolean(input.proactive),
             })
             .select(MESSAGE_COLUMNS)
             .single(),
@@ -204,7 +225,7 @@ export class IntelligenceEngine {
         failure = e;
       }
 
-      const finalText = cleanReply(text, isGroup ? names.get(sp.id) ?? '' : '');
+      const { text: finalText, photo } = extractPhoto(cleanReply(text, isGroup ? names.get(sp.id) ?? '' : ''));
       if (!finalText && !input.continueMessageId) {
         await this.db.from('messages').delete().eq('id', row.id);
         if (failure) throw failure;
@@ -228,7 +249,8 @@ export class IntelligenceEngine {
         'save reply',
       ) as MessageRow;
       input.emit({ type: 'message_done', message: toApiMessage(saved) });
-      created.push(saved);
+      const withPhoto = photo && !input.continueMessageId ? await this.attachPhoto(saved, photo, member?.sheet ?? character.sheet, conv, input) : saved;
+      created.push(withPhoto);
       if (!input.continueMessageId) {
         path = [...path, saved];
         parentId = saved.id;
@@ -248,6 +270,25 @@ export class IntelligenceEngine {
       await this.repo.enqueue('summarize', { conversationId: conv.id }, `sum:${conv.id}`, 60);
     }
     return created;
+  }
+
+  /** Turns a "[foto: ...]" line into a real image on the message (within the daily limit). */
+  private async attachPhoto(saved: MessageRow, description: string, sheet: CharacterWithSheet['sheet'], conv: ConversationRow, input: TurnInput): Promise<MessageRow> {
+    if (!this.images) return saved;
+    try {
+      if ((await this.images.photosToday(conv.user_id)) >= this.photosPerDay(Boolean(input.viewer.isPremium))) return saved;
+      input.emit({ type: 'image', messageId: saved.id, status: 'pending' });
+      const path = await this.images.generateChatPhoto({ userId: conv.user_id, conversationId: conv.id, description, sheet });
+      const updated = must(
+        await this.db.from('messages').update({ image_paths: [...(saved.image_paths ?? []), path] }).eq('id', saved.id).select(MESSAGE_COLUMNS).single(),
+        'attach photo',
+      ) as MessageRow;
+      input.emit({ type: 'message_done', message: toApiMessage(updated) });
+      return updated;
+    } catch {
+      input.emit({ type: 'image', messageId: saved.id, status: 'failed' });
+      return saved;
+    }
   }
 
   /** Group orchestration: decides who speaks, in which order and with what intent. */

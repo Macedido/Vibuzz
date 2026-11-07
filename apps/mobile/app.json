@@ -2,7 +2,7 @@
   "expo": {
     "name": "Vibuzz",
     "slug": "vibuzz",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vibuzz",
@@ -17,13 +17,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0A0A0F",
+        "backgroundColor": "#03041A",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "app.vibuzz.mobile"
+      "package": "app.vibuzz.mobile",
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "RECEIVE_BOOT_COMPLETED",
+        "RECORD_AUDIO"
+      ],
+      "versionCode": 2
     },
     "web": {
       "output": "single",
@@ -35,7 +41,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0A0A0F",
+          "backgroundColor": "#03041A",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 120
         }
@@ -46,13 +52,32 @@
           "photosPermission": "O Vibuzz usa suas fotos para avatares, personagens e imagens no chat.",
           "cameraPermission": "O Vibuzz usa a câmera para tirar fotos de referência."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#2A7DFF",
+          "defaultChannel": "mensagens"
+        }
+      ],
+      "expo-background-task",
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "O Vibuzz usa o microfone nas chamadas de voz com os personagens.",
+          "speechRecognitionPermission": "O Vibuzz transforma sua fala em texto nas chamadas de voz.",
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "backgroundColor": "#0A0A0F",
+    "backgroundColor": "#03041A",
     "description": "Create. Connect. Remember. Personagens com IA, memória permanente e comunidade."
   }
 }

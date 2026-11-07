@@ -7,6 +7,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Share, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { RoleplayText } from '@/components/rich-text';
+import { CollectionPicker } from '@/components/collection-picker';
 import {
   ActionSheet,
   Avatar,
@@ -44,6 +45,7 @@ export default function CharacterPage() {
   const { userId } = useAuth();
   const { width } = useWindowDimensions();
   const [menu, setMenu] = useState(false);
+  const [collect, setCollect] = useState(false);
   const [pickPersona, setPickPersona] = useState(false);
   const [starting, setStarting] = useState(false);
   const [comment, setComment] = useState('');
@@ -206,6 +208,7 @@ export default function CharacterPage() {
             <Button title={liked ? 'Curtido' : 'Curtir'} small variant="secondary" icon={liked ? 'heart' : 'heart-outline'} onPress={() => toggle('likes', liked)} style={{ flex: 1 }} />
             <Button title={faved ? 'Favorito' : 'Favoritar'} small variant="secondary" icon={faved ? 'bookmark' : 'bookmark-outline'} onPress={() => toggle('favorites', faved)} style={{ flex: 1 }} />
             <Button title="Compartilhar" small variant="secondary" icon="share-outline" onPress={share} style={{ flex: 1 }} />
+            <Button title="" small variant="secondary" icon="albums-outline" label="Salvar em coleção" onPress={() => setCollect(true)} style={{ width: 46, paddingHorizontal: 0 }} />
           </Row>
           {isMine ? <Button title="Editar personagem" variant="ghost" icon="create-outline" small onPress={() => router.push({ pathname: '/create/editor', params: { id } })} style={{ marginTop: space.sm }} /> : null}
 
@@ -320,11 +323,14 @@ export default function CharacterPage() {
         onClose={() => setMenu(false)}
         actions={[
           { label: 'Copiar link', icon: 'link-outline', onPress: () => Clipboard.setStringAsync(shareUrl) },
+          { label: 'Salvar em coleção', icon: 'albums-outline', onPress: () => setCollect(true) },
           ...(isMine
             ? [{ label: 'Editar', icon: 'create-outline' as const, onPress: () => router.push({ pathname: '/create/editor', params: { id } }) }]
             : [{ label: 'Denunciar personagem', icon: 'flag-outline' as const, danger: true, onPress: () => router.push({ pathname: '/report', params: { type: 'character', id } }) }]),
         ]}
       />
+
+      <CollectionPicker characterId={id} visible={collect} onClose={() => setCollect(false)} />
 
       <Panel visible={pickPersona} onClose={() => setPickPersona(false)} title="Conversar como…">
         <Pressable onPress={() => start(null)} style={styles.personaRow}>

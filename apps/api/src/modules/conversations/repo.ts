@@ -13,14 +13,18 @@ export class Repo {
     private opts: { immediateJobs?: boolean } = {},
   ) {}
 
-  async user(id: string): Promise<UserRow & { isAdult: boolean }> {
-    const row = must(await this.db.from('users').select('id, birthdate, allow_mature, role, status').eq('id', id).maybeSingle(), 'user') as UserRow | null;
+  async user(id: string): Promise<UserRow & { isAdult: boolean; isPremium: boolean }> {
+    const row = must(
+      await this.db.from('users').select('id, birthdate, allow_mature, role, status, plan, premium_until, spontaneous_messages, voice_enabled, timezone').eq('id', id).maybeSingle(),
+      'user',
+    ) as UserRow | null;
     if (!row) throw notFound('Usuário');
-    return { ...row, isAdult: ageFromBirthdate(row.birthdate) >= ADULT_AGE };
+    const isPremium = row.plan === 'premium' && (!row.premium_until || new Date(row.premium_until).getTime() > Date.now());
+    return { ...row, isAdult: row.birthdate ? ageFromBirthdate(row.birthdate) >= ADULT_AGE : false, isPremium };
   }
 
   async conversation(id: string, userId?: string): Promise<ConversationRow> {
-    let q = this.db.from('conversations').select('id, user_id, character_id, persona_id, title, active_leaf_id, creativity, is_archived').eq('id', id);
+    let q = this.db.from('conversations').select('id, user_id, character_id, persona_id, title, active_leaf_id, creativity, is_archived, proactive_mode, language').eq('id', id);
     if (userId) q = q.eq('user_id', userId);
     const row = must(await q.maybeSingle(), 'conversation') as ConversationRow | null;
     if (!row) throw notFound('Conversa');

@@ -1,22 +1,27 @@
 import { CATEGORIES } from '@vibuzz/shared';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CharacterGrid, CoverArt } from '@/components/character-card';
+import { CharacterGrid, CharacterRow, CoverArt } from '@/components/character-card';
 import { EmptyState, ErrorState, IconButton, Ionicons, Row } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { colors, radius, space, type } from '@/lib/theme';
-import { timeAgo, type CharacterCard, type ConversationItem } from '@/lib/types';
+import { brandGradient, colors, radius, space, type } from '@/lib/theme';
+import { compact, timeAgo, type CharacterCard, type ConversationItem } from '@/lib/types';
+
+const LOGO = require('@/assets/images/logo-mark.png');
 
 const PAGE = 30;
 
-type Feed = 'foryou' | 'trending' | 'recent' | 'popular' | 'groups' | 'following';
+type Feed = 'foryou' | 'ranking' | 'trending' | 'recent' | 'popular' | 'groups' | 'following';
 const FEEDS: { id: Feed; label: string }[] = [
   { id: 'foryou', label: 'Para você' },
+  { id: 'ranking', label: 'Top da semana' },
   { id: 'trending', label: 'Em alta' },
   { id: 'recent', label: 'Novos' },
   { id: 'popular', label: 'Populares' },
@@ -29,7 +34,14 @@ function dedupe(rows: CharacterCard[]): CharacterCard[] {
   return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 }
 
-async function loadFeed(feed: Feed, category: string | null, offset: number): Promise<{ rows: CharacterCard[]; more: boolean }> {
+type Ranked = CharacterCard & { rank?: number; score?: number };
+
+async function loadFeed(feed: Feed, category: string | null, offset: number): Promise<{ rows: Ranked[]; more: boolean }> {
+  if (feed === 'ranking') {
+    const data = (unwrap(await supabase.rpc('weekly_ranking', { p_limit: 50 })) as { rank: number; score: number; card: CharacterCard }[]) ?? [];
+    const rows = data.map((r) => ({ ...r.card, rank: r.rank, score: r.score })).filter((r) => !category || r.category_slug === category);
+    return { rows, more: false };
+  }
   const discover = async (args: Record<string, unknown>) =>
     (unwrap(await supabase.rpc('discover_characters', { p_limit: PAGE, p_offset: offset, p_category: category, ...args })) as CharacterCard[]) ?? [];
   if (feed === 'foryou') {
@@ -48,6 +60,7 @@ async function loadFeed(feed: Feed, category: string | null, offset: number): Pr
   }
   const args: Record<Feed, Record<string, unknown>> = {
     foryou: {},
+    ranking: {},
     trending: { p_sort: 'trending' },
     recent: { p_sort: 'recent' },
     popular: { p_sort: 'popular' },
@@ -92,6 +105,34 @@ function ContinueCard({ c }: { c: ConversationItem }) {
   );
 }
 
+function RankRow({ c }: { c: Ranked }) {
+  const top = (c.rank ?? 99) <= 3;
+  return (
+    <Row gap={space.sm} style={{ marginBottom: 2 }}>
+      {top ? (
+        <LinearGradient colors={[...brandGradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rank}>
+          <Text style={[styles.rankText, { color: '#fff' }]}>{c.rank}</Text>
+        </LinearGradient>
+      ) : (
+        <View style={[styles.rank, { backgroundColor: colors.surface }]}>
+          <Text style={styles.rankText}>{c.rank}</Text>
+        </View>
+      )}
+      <View style={{ flex: 1 }}>
+        <CharacterRow
+          c={c}
+          right={
+            <Row gap={4}>
+              <Ionicons name="flame" size={13} color={top ? colors.signal : colors.faint} />
+              <Text style={[type.small, { fontSize: 12 }]}>{compact(c.score ?? 0)}</Text>
+            </Row>
+          }
+        />
+      </View>
+    </Row>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -99,7 +140,7 @@ export default function Home() {
   const top = useQuery(loadTop, [], { refetchOnFocus: true });
   const [feed, setFeed] = useState<Feed>('foryou');
   const [category, setCategory] = useState<string | null>(null);
-  const [items, setItems] = useState<CharacterCard[]>([]);
+  const [items, setItems] = useState<Ranked[]>([]);
   const [more, setMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -140,9 +181,7 @@ export default function Home() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
         <Row gap={space.sm} style={{ flexShrink: 0 }}>
-          <View style={styles.logo}>
-            <Text style={styles.logoText}>V</Text>
-          </View>
+          <Image source={LOGO} style={styles.logo} contentFit="contain" accessibilityLabel="Vibuzz" />
           <Text style={styles.brand}>Vibuzz</Text>
         </Row>
         <Pressable onPress={() => router.push('/discover')} style={styles.search} accessibilityRole="search">
@@ -204,6 +243,8 @@ export default function Home() {
         ) : !items.length ? (
           feed === 'following' ? (
             <EmptyState icon="people-outline" title="Ninguém por aqui" message="Siga criadores para ver os personagens novos deles aqui." />
+          ) : feed === 'ranking' ? (
+            <EmptyState icon="trophy-outline" title="O ranking da semana está vazio" message="Ele conta conversas e curtidas dos últimos 7 dias. Converse com seus favoritos para colocá-los no topo." />
           ) : (
             <EmptyState
               icon="planet-outline"
@@ -213,6 +254,13 @@ export default function Home() {
               onAction={() => router.push('/create')}
             />
           )
+        ) : feed === 'ranking' ? (
+          <View style={{ maxWidth: 760 }}>
+            <Text style={[type.small, { marginBottom: space.md }]}>Conversas e curtidas dos últimos 7 dias. Atualiza o tempo todo.</Text>
+            {items.map((c) => (
+              <RankRow key={c.id} c={c} />
+            ))}
+          </View>
         ) : (
           <CharacterGrid
             items={items}
@@ -232,8 +280,9 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingBottom: space.sm, backgroundColor: colors.bg },
-  logo: { width: 30, height: 30, borderRadius: 9, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
-  logoText: { color: colors.accentInk, fontWeight: '900', fontSize: 18, marginTop: -1 },
+  logo: { width: 32, height: 32 },
+  rank: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  rankText: { color: colors.textSoft, fontWeight: '900', fontSize: 15 },
   brand: { color: colors.text, fontWeight: '900', fontSize: 20, letterSpacing: -0.6 },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 40, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft, paddingHorizontal: space.md, maxWidth: 520 },
   tabsWrap: { backgroundColor: colors.bg, paddingTop: space.lg, paddingBottom: space.md },

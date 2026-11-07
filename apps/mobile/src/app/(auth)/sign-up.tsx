@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { Pressable, Text } from 'react-native';
+import { GoogleButton } from '@/components/google-button';
 import { Banner, Button, Field, Ionicons, Row, Screen } from '@/components/ui';
 import { ageOf } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -20,7 +21,7 @@ export function parseBirthdate(input: string): string | null {
   return iso;
 }
 
-function maskDate(v: string) {
+export function maskDate(v: string) {
   const digits = v.replace(/\D/g, '').slice(0, 8);
   return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4)].filter(Boolean).join('/');
 }
@@ -75,6 +76,7 @@ export default function SignUp() {
   return (
     <Screen keyboard style={{ maxWidth: 520, width: '100%', alignSelf: 'center' }}>
       <Text style={[type.h1, { marginBottom: space.xl }]}>Criar conta</Text>
+      <GoogleButton onError={setError} divider="ou crie com e-mail" />
       {error ? <Banner tone="danger" text={error} /> : null}
       <Field label="Nome" value={form.displayName} onChangeText={set('displayName')} maxLength={50} />
       <Field label="Nome de usuário" value={form.username} onChangeText={set('username')} autoCapitalize="none" maxLength={24} placeholder="seu_nome" />

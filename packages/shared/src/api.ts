@@ -129,13 +129,59 @@ export interface ApiMessage {
   status: 'complete' | 'streaming' | 'error';
   is_pinned: boolean;
   created_at: string;
+  emotion?: Emotion | null;
+  is_spontaneous?: boolean;
 }
+
+/** Emotions a reply can show (set by the scene tracker after each turn). */
+export const EMOTIONS = ['feliz', 'animado', 'carinho', 'surpresa', 'vergonha', 'triste', 'raiva', 'medo', 'ciume', 'preocupado', 'tedio', 'neutro'] as const;
+export type Emotion = (typeof EMOTIONS)[number];
+export const EMOTION_LABELS: Record<Emotion, { emoji: string; label: string }> = {
+  feliz: { emoji: '😊', label: 'feliz' },
+  animado: { emoji: '🤩', label: 'animado' },
+  carinho: { emoji: '🥰', label: 'carinhoso' },
+  surpresa: { emoji: '😮', label: 'surpreso' },
+  vergonha: { emoji: '😳', label: 'com vergonha' },
+  triste: { emoji: '😢', label: 'triste' },
+  raiva: { emoji: '😠', label: 'bravo' },
+  medo: { emoji: '😨', label: 'com medo' },
+  ciume: { emoji: '😒', label: 'com ciúme' },
+  preocupado: { emoji: '😟', label: 'preocupado' },
+  tedio: { emoji: '😑', label: 'entediado' },
+  neutro: { emoji: '🙂', label: 'tranquilo' },
+};
+
+/** Relationship meters (0–100) toward the user. */
+export const METERS = [
+  { key: 'amizade', label: 'Amizade' },
+  { key: 'confianca', label: 'Confiança' },
+  { key: 'intimidade', label: 'Intimidade' },
+  { key: 'rivalidade', label: 'Rivalidade' },
+] as const;
+export type MeterKey = (typeof METERS)[number]['key'];
+
+/** Limits by plan. The free plan stays fully usable. */
+export const PLAN_LIMITS = {
+  free: { imagesPerDay: 12, proactivePerDay: { sometimes: 2, often: 6 }, privateCharacters: 20, memoryItems: 12 },
+  premium: { imagesPerDay: 80, proactivePerDay: { sometimes: 3, often: 16 }, privateCharacters: 200, memoryItems: 24 },
+} as const;
+export type Plan = keyof typeof PLAN_LIMITS;
+
+export const PROACTIVE_MODES = ['off', 'sometimes', 'often'] as const;
+export type ProactiveMode = (typeof PROACTIVE_MODES)[number];
+
+export const translateSchema = z.object({ lang: z.string().trim().min(2).max(40) });
+export const pushSubscribeSchema = z.object({
+  endpoint: z.string().url().max(1000),
+  keys: z.object({ p256dh: z.string().min(20).max(200), auth: z.string().min(8).max(100) }),
+});
 
 export type StreamEvent =
   | { type: 'user_message'; message: ApiMessage }
   | { type: 'speaker'; messageId: string; characterId: string | null; name: string }
   | { type: 'delta'; messageId: string; text: string }
   | { type: 'message_done'; message: ApiMessage }
+  | { type: 'image'; messageId: string; status: 'pending' | 'failed' }
   | { type: 'done' }
   | { type: 'error'; code: string; message: string };
 

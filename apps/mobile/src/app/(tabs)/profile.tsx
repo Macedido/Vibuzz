@@ -1,12 +1,13 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { RefreshControl, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { CharacterRow } from '@/components/character-card';
-import { Avatar, Button, Card, EmptyState, IconButton, Loading, Row, Screen, Segmented, TopBar } from '@/components/ui';
+import { Avatar, Button, Card, EmptyState, IconButton, Ionicons, ListItem, Loading, Row, Screen, Segmented, TopBar } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { colors, space, type } from '@/lib/theme';
+import { brandGradient, colors, radius, space, type } from '@/lib/theme';
 import { compact, type CharacterCard } from '@/lib/types';
 
 function Stat({ value, label }: { value: number; label: string }) {
@@ -20,15 +21,18 @@ function Stat({ value, label }: { value: number; label: string }) {
 
 export default function Profile() {
   const router = useRouter();
-  const { profile, userId, refresh: refreshAuth } = useAuth();
-  const [tab, setTab] = useState<'created' | 'favorites'>('created');
+  const { profile, userId, account, refresh: refreshAuth } = useAuth();
+  const [tab, setTab] = useState<'created' | 'favorites' | 'collections'>('created');
   const q = useQuery(
     async () => {
       if (!userId) return null;
-      const [mine, favs, stats] = await Promise.all([
+      const [mine, favs, stats, cols, badges, allBadges] = await Promise.all([
         supabase.from('character_cards').select('*').eq('creator_id', userId).neq('status', 'removed').order('created_at', { ascending: false }),
         supabase.from('favorites').select('character_id, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(100),
         supabase.rpc('creator_stats', { p_user: userId }),
+        supabase.from('collections').select('id, name, item_count, is_public').eq('owner_id', userId).order('updated_at', { ascending: false }),
+        supabase.from('user_achievements').select('code', { count: 'exact', head: true }).eq('user_id', userId),
+        supabase.from('achievements').select('code', { count: 'exact', head: true }),
       ]);
       const favIds = (unwrap(favs) as { character_id: string }[]).map((f) => f.character_id);
       const favCards = favIds.length ? ((unwrap(await supabase.from('character_cards').select('*').in('id', favIds)) as CharacterCard[]) ?? []) : [];
@@ -36,6 +40,8 @@ export default function Profile() {
         mine: (unwrap(mine) as CharacterCard[]) ?? [],
         favorites: favIds.map((id) => favCards.find((c) => c.id === id)).filter(Boolean) as CharacterCard[],
         stats: ((unwrap(stats) as { conversations: number; likes: number }[]) ?? [])[0] ?? { conversations: 0, likes: 0 },
+        collections: (cols.data as { id: string; name: string; item_count: number; is_public: boolean }[] | null) ?? [],
+        badges: { got: badges.count ?? 0, total: allBadges.count ?? 0 },
       };
     },
     [userId],
@@ -43,7 +49,7 @@ export default function Profile() {
   );
 
   if (!profile) return <Loading />;
-  const list = tab === 'created' ? q.data?.mine : q.data?.favorites;
+  const list = tab === 'created' ? q.data?.mine : tab === 'favorites' ? q.data?.favorites : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -81,6 +87,25 @@ export default function Profile() {
             <Button title="Editar perfil" variant="secondary" small icon="pencil" onPress={() => router.push('/edit-profile')} style={{ flex: 1 }} />
             <Button title="Personas" variant="secondary" small icon="happy-outline" onPress={() => router.push('/personas')} style={{ flex: 1 }} />
           </Row>
+          <Row style={{ marginTop: space.md }}>
+            <Pressable onPress={() => router.push('/achievements')} style={({ pressed }) => [styles.tile, pressed && { opacity: 0.85 }]}>
+              <Ionicons name="trophy-outline" size={20} color={colors.signal} />
+              <View style={{ flex: 1 }}>
+                <Text style={type.h3}>Conquistas</Text>
+                <Text style={type.small}>{q.data ? `${q.data.badges.got} de ${q.data.badges.total}` : '…'}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.faint} />
+            </Pressable>
+            <Pressable onPress={() => router.push('/premium')} style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.85 }]}>
+              <LinearGradient colors={[...brandGradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.tile, { borderWidth: 0 }]}>
+                <Ionicons name="star" size={20} color="#fff" />
+                <View style={{ flex: 1 }}>
+                  <Text style={[type.h3, { color: '#fff' }]}>{account?.plan === 'premium' ? 'Premium ativo' : 'Premium'}</Text>
+                  <Text style={[type.small, { color: '#ffffffcc' }]}>{account?.plan === 'premium' ? 'Obrigado!' : account?.premium_waitlist ? 'Na lista de espera' : 'Ver planos'}</Text>
+                </View>
+              </LinearGradient>
+            </Pressable>
+          </Row>
           <View style={{ marginTop: space.xl }}>
             <Segmented
               value={tab}
@@ -88,12 +113,27 @@ export default function Profile() {
               options={[
                 { value: 'created', label: 'Criados' },
                 { value: 'favorites', label: 'Favoritos' },
+                { value: 'collections', label: 'Coleções' },
               ]}
             />
           </View>
           <View style={{ marginTop: space.md }}>
             {q.loading ? (
               <Loading />
+            ) : tab === 'collections' ? (
+              q.data?.collections.length ? (
+                q.data.collections.map((c) => (
+                  <ListItem
+                    key={c.id}
+                    icon={c.is_public ? 'albums-outline' : 'lock-closed-outline'}
+                    title={c.name}
+                    subtitle={`${c.item_count} ${c.item_count === 1 ? 'personagem' : 'personagens'}${c.is_public ? '' : ' · privada'}`}
+                    onPress={() => router.push(`/collection/${c.id}`)}
+                  />
+                ))
+              ) : (
+                <EmptyState icon="albums-outline" title="Nenhuma coleção" message="Abra um personagem e toque no ícone de coleção para montar listas como “Vilões favoritos”." />
+              )
             ) : !list?.length ? (
               tab === 'created' ? (
                 <EmptyState icon="sparkles-outline" title="Você ainda não criou nada" action="Criar personagem" onAction={() => router.push('/create')} />
@@ -119,3 +159,7 @@ export default function Profile() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  tile: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.md, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft },
+});

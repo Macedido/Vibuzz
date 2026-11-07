@@ -28,7 +28,7 @@ alter default privileges in schema public grant all on sequences to anon, authen
 
 create schema auth;
 grant usage on schema auth to anon, authenticated, service_role;
-create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}');
+create table auth.users (id uuid primary key default gen_random_uuid(), email text, raw_user_meta_data jsonb default '{}', raw_app_meta_data jsonb default '{}');
 create function auth.uid() returns uuid language sql stable as $$
   select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
 $$;
@@ -313,6 +313,69 @@ console.log('Worker cron');
     await expectError('client cannot verify cron token', () => db.query(`select verify_cron_token('x')`), 'permission denied');
     await expectError('client cannot read private settings', () => db.query(`select * from private.settings`), 'permission denied');
   });
+}
+
+console.log('v2: Google sign-up, vida própria, coleções, conquistas, ranking, galeria');
+{
+  const g = (await one(`insert into auth.users (email, raw_user_meta_data, raw_app_meta_data) values ('g@x.com', '{"full_name":"Gabi Google"}', '{"provider":"google"}') returning id`)).id;
+  check('google sign-up without birthdate', (await one(`select birthdate from users where id = $1`, [g])).birthdate === null);
+  check('google name used as display name', (await one(`select display_name from user_profiles where id = $1`, [g])).display_name === 'Gabi Google');
+  await expectError('no 18+ without birthdate', () => db.query(`update users set allow_mature = true where id = $1`, [g]), 'mature_requires_adult');
+  await as(g, async () => {
+    await expectError('google user under 13 rejected', () => db.query(`select complete_signup($1::date)`, [`${new Date().getFullYear() - 10}-01-01`]), 'underage');
+    await db.query(`select complete_signup('1995-05-05'::date)`);
+  });
+  check('complete_signup stores birthdate', (await one(`select birthdate is not null as ok from users where id = $1`, [g])).ok === true);
+
+  check('achievement: first conversation', (await all(`select 1 from user_achievements where user_id = $1 and code = 'primeiro_oi'`, [alice])).length === 1);
+  check('achievement: first character', (await all(`select 1 from user_achievements where user_id = $1 and code = 'criador'`, [bob])).length === 1);
+  check('achievement notification sent', (await all(`select 1 from notifications where user_id = $1 and type = 'achievement'`, [bob])).length >= 1);
+  check('stats count user messages', (await one(`select messages_sent from user_stats where user_id = $1`, [alice])).messages_sent >= 2);
+
+  await db.query(`update conversations set proactive_mode = 'often' where id = $1`, [conv]);
+  check('proactive message scheduled', (await one(`select next_proactive_at > now() as ok from conversations where id = $1`, [conv])).ok === true);
+  const h = new Date().getUTCHours();
+  const k = 12 - h;
+  const tz = k >= 0 ? `Etc/GMT-${k}` : `Etc/GMT+${-k}`;
+  await db.query(`update users set spontaneous_messages = true, timezone = $2 where id = $1`, [alice, tz]);
+  await db.query(`update conversations set next_proactive_at = now() - interval '1 minute' where id = $1`, [conv]);
+  check('claim_proactive returns the due conversation', (await all(`select * from claim_proactive(5)`)).length === 1);
+  check('claimed conversation is not claimed twice', (await all(`select * from claim_proactive(5)`)).length === 0);
+  await db.query(`update conversations set proactive_mode = 'off' where id = $1`, [conv]);
+  check('turning it off clears the schedule', (await one(`select next_proactive_at from conversations where id = $1`, [conv])).next_proactive_at === null);
+  await as(alice, async () => {
+    await expectError('client cannot claim proactive', () => db.query(`select * from claim_proactive(5)`), 'permission denied');
+    await expectError('client cannot read vapid keys', () => db.query(`select * from vapid_keys()`), 'permission denied');
+  });
+
+  let col;
+  await as(alice, async () => {
+    col = (await one(`insert into collections (owner_id, name) values ($1, 'Favoritos') returning id`, [alice])).id;
+    await db.query(`insert into collection_items (collection_id, character_id) values ($1, $2)`, [col, pub]);
+  });
+  check('collection item count', (await one(`select item_count from collections where id = $1`, [col])).item_count === 1);
+  check('achievement: first collection', (await all(`select 1 from user_achievements where user_id = $1 and code = 'colecionador'`, [alice])).length === 1);
+  await as(bob, async () => {
+    await expectError('cannot add to someone else collection', () => db.query(`insert into collection_items (collection_id, character_id) values ($1, $2)`, [col, grp]), 'row-level security');
+  });
+
+  await db.query(`update users set private_mode = true where id = $1`, [alice]);
+  check('private mode hides collections from others', (await as(bob, () => all(`select 1 from collections where id = $1`, [col]))).length === 0);
+  check('private mode keeps own collections visible', (await as(alice, () => all(`select 1 from collections where id = $1`, [col]))).length === 1);
+  await db.query(`update users set private_mode = false where id = $1`, [alice]);
+  check('public collection visible to others', (await as(bob, () => all(`select 1 from collections where id = $1`, [col]))).length === 1);
+  const rk = await as(alice, () => all(`select rank, score, (card).id as id from weekly_ranking(10)`));
+  check('weekly ranking lists the active character', rk.length >= 1 && rk[0].id === pub && rk[0].rank === 1);
+  const rkBob = await as(bob, () => all(`select (card).id as id from weekly_ranking(10)`));
+  check('weekly ranking counts other users activity', rkBob.some((r) => r.id === pub));
+  await as(alice, async () => {
+    await expectError('weekly scores helper is not in the REST schema', () => db.query(`select * from public.weekly_scores()`), 'does not exist');
+  });
+
+  await db.query(`update messages set image_paths = '{x/y.jpg}' where id = $1`, [m2]);
+  check('photo counted', (await one(`select photos_received from user_stats where user_id = $1`, [alice])).photos_received === 1);
+  check('gallery lists conversation images', (await as(alice, () => all(`select * from conversation_gallery($1)`, [conv]))).length === 1);
+  check('others cannot see the gallery', (await as(bob, () => all(`select * from conversation_gallery($1)`, [conv]))).length === 0);
 }
 
 console.log('Cascade delete account');

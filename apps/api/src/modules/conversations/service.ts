@@ -60,6 +60,7 @@ export class ConversationService {
   private async assertActive(userId: string) {
     const user = await this.repo.user(userId);
     if (user.status !== 'active') throw forbidden('Conta suspensa.');
+    if (!user.birthdate) throw new AppError(403, 'birthdate_required', 'Informe sua data de nascimento para continuar.');
     return user;
   }
 

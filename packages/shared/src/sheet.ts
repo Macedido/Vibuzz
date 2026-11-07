@@ -54,6 +54,15 @@ export const characterSheetSchema = z.object({
   relations: z.array(relationSchema).max(30).optional().default([]),
   universe: long.optional().default(''),
   scenario: long.optional().default(''),
+  /** Voice for text-to-speech (device voices). */
+  voice: z
+    .object({
+      gender: z.enum(['auto', 'feminina', 'masculina']).default('auto'),
+      pitch: z.number().min(0.5).max(1.8).default(1),
+      rate: z.number().min(0.6).max(1.6).default(1),
+    })
+    .default({})
+    .catch({ gender: 'auto', pitch: 1, rate: 1 }),
   /** Who the user plays in this story (the AI never speaks or acts for this role). */
   userRole: long.optional().default(''),
   firstMessage: long.optional().default(''),

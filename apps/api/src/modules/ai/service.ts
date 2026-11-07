@@ -4,6 +4,7 @@ import type { Env } from '../../config';
 import { NotConfiguredError, ProviderError } from '../../lib/errors';
 import { extractJson } from '../../lib/json';
 import { AnthropicProvider } from './providers/anthropic';
+import { GeminiProvider, geminiBasesFor } from './providers/gemini';
 import { OpenAICompatibleProvider } from './providers/openai';
 import { hasSupabaseAi, SupabaseAiEmbeddings } from './providers/supabase-ai';
 import type { Capability, ChatProvider, ChatRequest, ChatResult, ModelRef, ModerationResult, Tier, Usage } from './types';
@@ -109,7 +110,7 @@ export class AiService {
     if (env.OPENAI_API_KEY) {
       providers.set('openai', new OpenAICompatibleProvider('openai', env.OPENAI_API_KEY, env.OPENAI_BASE_URL, { official: true }));
     }
-    if (env.GEMINI_API_KEY) providers.set('gemini', new OpenAICompatibleProvider('gemini', env.GEMINI_API_KEY, env.GEMINI_BASE_URL));
+    if (env.GEMINI_API_KEY) providers.set('gemini', new GeminiProvider(env.GEMINI_API_KEY.trim(), geminiBasesFor(env.GEMINI_API_KEY.trim(), env.GEMINI_NATIVE_BASE)));
     if (env.COMPAT_API_KEY && env.COMPAT_BASE_URL) {
       providers.set('compat', new OpenAICompatibleProvider('compat', env.COMPAT_API_KEY, env.COMPAT_BASE_URL));
     }

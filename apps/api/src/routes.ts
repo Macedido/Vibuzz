@@ -7,6 +7,8 @@ import {
   memoryUpdateSchema,
   portraitSchema,
   profileUpdateSchema,
+  pushSubscribeSchema,
+  translateSchema,
   regenerateFieldSchema,
   regenerateSchema,
   sendMessageSchema,
@@ -159,6 +161,67 @@ export function registerRoutes(app: Hono<AppEnv>, s: Services, log: Logger, limi
     return c.json(out);
   });
 
+  app.post('/v1/messages/:id/translate', async (c) => {
+    limit(c, 'translate', 20);
+    const { id } = parse(idParams, c.req.param());
+    const { lang } = parse(translateSchema, await body(c));
+    const msg = await s.repo.message(id);
+    await s.repo.conversation(msg.conversation_id, uid(c));
+    const { data: row } = await s.db.from('messages').select('translations').eq('id', id).single();
+    const cached = ((row as { translations: Record<string, string> | null } | null)?.translations ?? {}) as Record<string, string>;
+    const key = lang.toLowerCase();
+    if (cached[key]) return c.json({ text: cached[key], lang });
+    const out = await s.ai.complete(
+      'fast',
+      {
+        system: { stable: `Translate the user's roleplay message into ${lang}. Keep *actions in asterisks*, names, tone and line breaks. Output only the translation.` },
+        messages: [{ role: 'user', content: msg.content }],
+        maxTokens: 1500,
+        temperature: 0.2,
+      },
+      { userId: uid(c), conversationId: msg.conversation_id, kind: 'translate' },
+    );
+    const text = out.text.trim();
+    await s.db.from('messages').update({ translations: { ...cached, [key]: text } }).eq('id', id);
+    return c.json({ text, lang });
+  });
+
+  app.post('/v1/conversations/:id/nudge', async (c) => {
+    limit(c, 'nudge', 3);
+    const { id } = parse(idParams, c.req.param());
+    const conv = await s.repo.conversation(id, uid(c));
+    if (!conv.proactive_mode || conv.proactive_mode === 'off') throw badRequest('Ative a vida própria nesta conversa primeiro.');
+    const sent = await s.life.runOne(id);
+    if (!sent) throw new AppError(409, 'not_now', 'Agora não dá: espere você ou o personagem responder, ou o limite de hoje acabou.');
+    return c.json({ ok: true });
+  });
+
+  /* --------------------------------- push --------------------------------- */
+
+  app.get('/v1/push/key', async (c) => c.json({ publicKey: (await s.push.vapid()).publicKey }));
+
+  app.post('/v1/push/subscribe', async (c) => {
+    limit(c, 'push', 10);
+    const sub = parse(pushSubscribeSchema, await body(c));
+    await s.push.subscribe(uid(c), sub, c.req.header('user-agent') ?? '');
+    return c.json({ ok: true });
+  });
+
+  app.post('/v1/push/unsubscribe', async (c) => {
+    const { endpoint } = parse(z.object({ endpoint: z.string().url().max(1000) }), await body(c));
+    await s.push.unsubscribe(uid(c), endpoint);
+    return c.json({ ok: true });
+  });
+
+  app.post('/v1/push/test', async (c) => {
+    limit(c, 'push_test', 3);
+    const body = 'Notificações ligadas! Seus personagens vão te avisar por aqui.';
+    // The row is what the Android app's background check turns into a notification.
+    await s.db.from('notifications').insert({ user_id: uid(c), type: 'system', payload: { title: 'Vibuzz', body, test: true } });
+    const delivered = await s.push.sendToUser(uid(c), { title: 'Vibuzz', body, url: '/', tag: 'test' });
+    return c.json({ delivered });
+  });
+
   app.post('/v1/messages/:id/switch', async (c) => {
     const { id } = parse(idParams, c.req.param());
     return c.json(await s.conversations.switchBranch(uid(c), id));
@@ -256,9 +319,10 @@ export function registerRoutes(app: Hono<AppEnv>, s: Services, log: Logger, limi
     const token = c.req.header('x-cron-token') ?? '';
     const { data } = await s.db.rpc('verify_cron_token', { p_token: token });
     if (data !== true) throw new AppError(401, 'unauthorized', 'Token inválido.');
-    const processed = await s.worker.drain(45_000);
+    const processed = await s.worker.drain(30_000);
     await s.maintenance();
+    const spontaneous = await s.life.runDue(3, 45_000);
     await s.flushUsage();
-    return c.json({ processed });
+    return c.json({ processed, spontaneous });
   });
 }

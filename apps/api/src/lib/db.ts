@@ -19,10 +19,16 @@ export function must<T>(res: { data: T | null; error: { message: string; code?: 
 
 export interface UserRow {
   id: string;
-  birthdate: string;
+  /** Null until a Google sign-up completes the age step. */
+  birthdate: string | null;
   allow_mature: boolean;
   role: 'user' | 'moderator' | 'admin';
   status: 'active' | 'suspended';
+  plan?: 'free' | 'premium';
+  premium_until?: string | null;
+  spontaneous_messages?: boolean;
+  voice_enabled?: boolean;
+  timezone?: string;
 }
 
 export interface CharacterRow {
@@ -69,6 +75,8 @@ export interface ConversationRow {
   active_leaf_id: string | null;
   creativity: number;
   is_archived: boolean;
+  proactive_mode?: 'off' | 'sometimes' | 'often';
+  language?: string | null;
 }
 
 export interface MessageRow {
@@ -82,6 +90,8 @@ export interface MessageRow {
   audience_character_id: string | null;
   content: string;
   image_paths: string[];
+  emotion?: string | null;
+  is_spontaneous?: boolean;
   image_analyses: ImageAnalysisRef[] | null;
   scene_state: SceneState | null;
   status: 'complete' | 'streaming' | 'error';
@@ -98,4 +108,4 @@ export interface ImageAnalysisRef {
 }
 
 export const MESSAGE_COLUMNS =
-  'id, conversation_id, parent_id, depth, role, speaker_character_id, persona_id, audience_character_id, content, image_paths, image_analyses, scene_state, status, is_pinned, deleted_at, created_at, memory_processed_at';
+  'id, conversation_id, parent_id, depth, role, speaker_character_id, persona_id, audience_character_id, content, image_paths, image_analyses, scene_state, status, is_pinned, deleted_at, created_at, memory_processed_at, emotion, is_spontaneous';

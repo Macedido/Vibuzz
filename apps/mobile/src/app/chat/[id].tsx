@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { EMOTION_LABELS, type ProactiveMode } from '@vibuzz/shared';
 import { CoverArt, paletteFor } from '@/components/character-card';
 import { RoleplayText } from '@/components/rich-text';
 import {
@@ -38,14 +39,27 @@ import {
 } from '@/components/ui';
 import { api, errorMessage, stream } from '@/lib/api';
 import { unwrap } from '@/lib/hooks';
+import { useAuth } from '@/lib/auth';
+import { enablePush, isPushOn, pushSupported } from '@/lib/pwa';
 import { chatImageUrl, mediaUrl, supabase } from '@/lib/supabase';
+import { askMicrophone, canCall, listenOnce, speak, stopSpeaking, type VoiceStyle } from '@/lib/voice';
 import { colors, radius, space, type } from '@/lib/theme';
 import type { Persona, PathMessage } from '@/lib/types';
 import { pickImage, uploadImage, type PickedImage } from '@/lib/upload';
 
 interface Meta {
-  conversation: { id: string; title: string; character_id: string; persona_id: string | null; creativity: number; is_favorite: boolean; is_archived: boolean };
-  character: { id: string; name: string; avatar_path: string | null; kind: string } | null;
+  conversation: {
+    id: string;
+    title: string;
+    character_id: string;
+    persona_id: string | null;
+    creativity: number;
+    is_favorite: boolean;
+    is_archived: boolean;
+    proactive_mode: ProactiveMode;
+    language: string | null;
+  };
+  character: { id: string; name: string; avatar_path: string | null; kind: string; voice?: VoiceStyle | null } | null;
   members: { id: string; name: string; avatar_path: string | null }[];
   personas: Persona[];
 }
@@ -54,6 +68,22 @@ interface UiMessage extends PathMessage {
   streaming?: boolean;
   failed?: boolean;
   localImages?: string[];
+  photo?: 'pending' | 'failed';
+  translated?: string;
+}
+
+const LANGUAGES = [
+  { value: '', label: 'Automático' },
+  { value: 'português do Brasil', label: 'Português' },
+  { value: 'English', label: 'English' },
+  { value: 'español', label: 'Español' },
+  { value: 'français', label: 'Français' },
+  { value: '日本語', label: '日本語' },
+];
+
+/** Hides the "[foto: …]" line (also while it is still being typed). */
+function visibleText(t: string): string {
+  return t.replace(/\[(?:foto|photo|imagem|image|selfie)\s*:[^\]]*(\]|$)/gi, '').trim();
 }
 
 const CREATIVITY = [
@@ -97,6 +127,14 @@ export default function ChatScreen() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState<{ id: string; role: string; content: string }[]>([]);
   const [deleting, setDeleting] = useState<UiMessage | null>(null);
+  const { account, refresh: refreshAccount } = useAuth();
+  const [autoVoice, setAutoVoice] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [call, setCall] = useState<'off' | 'listening' | 'thinking' | 'speaking'>('off');
+  const [heard, setHeard] = useState('');
+  const [pushState, setPushState] = useState<'unknown' | 'on' | 'off'>('unknown');
+  const callRef = useRef<{ stop: () => void } | null>(null);
+  const callOn = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<UiMessage>>(null);
 
@@ -118,11 +156,11 @@ export default function ChatScreen() {
     setLoadError(null);
     try {
       const conv = unwrap(
-        await supabase.from('conversations').select('id, title, character_id, persona_id, creativity, is_favorite, is_archived').eq('id', id).maybeSingle(),
+        await supabase.from('conversations').select('id, title, character_id, persona_id, creativity, is_favorite, is_archived, proactive_mode, language').eq('id', id).maybeSingle(),
       ) as Meta['conversation'] | null;
       if (!conv) throw new Error('Conversa não encontrada.');
       const [character, members, personas] = await Promise.all([
-        supabase.from('characters').select('id, name, avatar_path, kind').eq('id', conv.character_id).maybeSingle(),
+        supabase.from('characters').select('id, name, avatar_path, kind, voice').eq('id', conv.character_id).maybeSingle(),
         supabase.from('conversation_members').select('character:characters(id, name, avatar_path)').eq('conversation_id', id),
         supabase.from('personas').select('*').order('created_at'),
       ]);
@@ -147,6 +185,7 @@ export default function ChatScreen() {
 
   /* ----------------------------- streaming ------------------------------ */
 
+  const onReplyDone = useRef<((m: UiMessage) => void) | null>(null);
   const handleEvent = useCallback(
     (e: StreamEvent, tempUserId?: string) => {
       switch (e.type) {
@@ -188,7 +227,13 @@ export default function ChatScreen() {
           setMessages((prev) => prev.map((m) => (m.id === e.messageId ? { ...m, content: m.content + e.text } : m)));
           break;
         case 'message_done':
-          setMessages((prev) => prev.map((m) => (m.id === e.message.id ? { ...m, ...e.message, streaming: false } : m)));
+          setMessages((prev) =>
+            prev.map((m) => (m.id === e.message.id ? { ...m, ...e.message, streaming: false, photo: e.message.image_paths?.length ? undefined : m.photo } : m)),
+          );
+          if (e.message.role === 'assistant') onReplyDone.current?.(e.message as unknown as UiMessage);
+          break;
+        case 'image':
+          setMessages((prev) => prev.map((m) => (m.id === e.messageId ? { ...m, photo: e.status } : m)));
           break;
         case 'error':
           setError(e.message);
@@ -213,6 +258,8 @@ export default function ChatScreen() {
         setBusy(false);
         setTypingName(null);
         abortRef.current = null;
+        // Emotions and relationship meters arrive a few seconds later (background job).
+        setTimeout(() => void loadPath().catch(() => {}), 8000);
         // Re-sync with the server: ids, siblings and branch state.
         await loadPath().catch(() => {});
       }
@@ -220,13 +267,15 @@ export default function ChatScreen() {
     [handleEvent, loadPath],
   );
 
-  const send = async () => {
-    const content = text.trim();
-    if ((!content && !images.length) || busy) return;
+  const send = async (override?: string) => {
+    const content = (override ?? text).trim();
+    const picked = override !== undefined ? [] : images;
+    if ((!content && !picked.length) || busy) return;
     void Haptics.selectionAsync().catch(() => {});
-    const picked = images;
-    setText('');
-    setImages([]);
+    if (override === undefined) {
+      setText('');
+      setImages([]);
+    }
     const tempId = `temp-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
@@ -317,6 +366,147 @@ export default function ChatScreen() {
     setResults((data as { id: string; role: string; content: string }[]) ?? []);
   };
 
+  /* -------------------------------- voice -------------------------------- */
+
+  const voiceFor = (m: UiMessage) => {
+    const who = m.speaker_character_id ?? meta?.character?.id ?? 'x';
+    const style = who === meta?.character?.id ? meta?.character?.voice ?? undefined : undefined;
+    return { characterId: who, style: style ?? undefined };
+  };
+
+  const ensureVoice = async (): Promise<boolean> => {
+    if (account?.voice_enabled) return true;
+    const { error: e } = await supabase.from('users').update({ voice_enabled: true }).eq('id', account?.id ?? '');
+    if (e) {
+      setError('Não foi possível ativar a voz.');
+      return false;
+    }
+    await refreshAccount();
+    return true;
+  };
+
+  const listen = (m: UiMessage) => {
+    if (speakingId === m.id) {
+      stopSpeaking();
+      setSpeakingId(null);
+      return;
+    }
+    void ensureVoice().then((ok) => {
+      if (!ok) return;
+      setSpeakingId(m.id);
+      void speak(m.content, { ...voiceFor(m), onDone: () => setSpeakingId((cur) => (cur === m.id ? null : cur)) });
+    });
+  };
+
+  const callListen = () => {
+    if (!callOn.current) return;
+    setCall('listening');
+    setHeard('');
+    const lang = meta?.conversation.language && !/portugu/i.test(meta.conversation.language) ? 'en-US' : 'pt-BR';
+    const session = listenOnce(lang, setHeard);
+    callRef.current = session;
+    session.promise
+      .then((said) => {
+        if (!callOn.current) return;
+        if (!said) return callListen();
+        setCall('thinking');
+        void send(said);
+      })
+      .catch(() => {
+        callOn.current = false;
+        setCall('off');
+        setError('O microfone não respondeu. Confira a permissão do navegador.');
+      });
+  };
+
+  const startCall = async () => {
+    if (!(await ensureVoice())) return;
+    if (!(await askMicrophone())) {
+      setError('Permita o microfone para fazer chamadas de voz.');
+      return;
+    }
+    callOn.current = true;
+    callListen();
+  };
+
+  const endCall = () => {
+    callOn.current = false;
+    callRef.current?.stop();
+    stopSpeaking();
+    setCall('off');
+  };
+
+  onReplyDone.current = (m) => {
+    if (callOn.current) {
+      setCall('speaking');
+      void speak(m.content, { ...voiceFor(m), onDone: () => callListen() });
+    } else if (autoVoice && account?.voice_enabled) {
+      setSpeakingId(m.id);
+      void speak(m.content, { ...voiceFor(m), onDone: () => setSpeakingId(null) });
+    }
+  };
+
+  useEffect(
+    () => () => {
+      callOn.current = false;
+      stopSpeaking();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!pushSupported()) return;
+    void isPushOn().then((on) => setPushState(on ? 'on' : 'off'));
+  }, []);
+
+  /* ------------------------------ life ------------------------------- */
+
+  const setProactive = async (mode: ProactiveMode) => {
+    if (mode !== 'off' && !account?.spontaneous_messages) {
+      await supabase.from('users').update({ spontaneous_messages: true }).eq('id', account?.id ?? '');
+      await refreshAccount();
+    }
+    await updateConversation({ proactive_mode: mode });
+  };
+
+  const nudge = async () => {
+    try {
+      setBusy(true);
+      await api(`/v1/conversations/${id}/nudge`, { body: {} });
+      await loadPath();
+      setSettings(false);
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const turnOnPush = async () => {
+    try {
+      const r = await enablePush();
+      setPushState(r === 'on' ? 'on' : 'off');
+      if (r === 'denied') setError('As notificações foram bloqueadas no navegador. Libere nas configurações do site.');
+      if (r === 'on') await api('/v1/push/test', { body: {} }).catch(() => {});
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
+  const translate = async (m: UiMessage) => {
+    if (m.translated) {
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, translated: undefined } : x)));
+      return;
+    }
+    const lang = meta?.conversation.language || (/[ãõçáéíóú]|\b(você|não|é)\b/i.test(m.content) ? 'English' : 'português do Brasil');
+    try {
+      const out = await api<{ text: string }>(`/v1/messages/${m.id}/translate`, { body: { lang } });
+      setMessages((prev) => prev.map((x) => (x.id === m.id ? { ...x, translated: out.text } : x)));
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
+
   const addImage = async () => {
     try {
       const img = await pickImage();
@@ -345,8 +535,10 @@ export default function ChatScreen() {
   };
 
   const menuActions = (m: UiMessage): SheetAction[] => {
-    const acts: SheetAction[] = [{ label: 'Copiar', icon: 'copy-outline', onPress: () => Clipboard.setStringAsync(m.content) }];
+    const acts: SheetAction[] = [{ label: 'Copiar', icon: 'copy-outline', onPress: () => Clipboard.setStringAsync(visibleText(m.content)) }];
     if (!m.id.startsWith('temp-')) {
+      if (m.role === 'assistant') acts.push({ label: speakingId === m.id ? 'Parar de ouvir' : 'Ouvir', icon: 'volume-high-outline', onPress: () => listen(m) });
+      acts.push({ label: m.translated ? 'Ver original' : 'Traduzir', icon: 'language-outline', onPress: () => translate(m) });
       acts.push({ label: 'Editar', icon: 'create-outline', onPress: () => { setEditing(m); setEditText(m.content); setEditMode('branch'); } });
       if (m.role === 'assistant' && m.parent_id) acts.push({ label: 'Regenerar resposta', icon: 'refresh', onPress: () => regenerate(m) });
       if (m.role === 'assistant' && m.id === last?.id) acts.push({ label: 'Continuar resposta', icon: 'play-forward-outline', onPress: () => run(`/v1/conversations/${id}/continue`, {}) });
@@ -386,14 +578,43 @@ export default function ChatScreen() {
                 {m.localImages?.length ? m.localImages.map((u) => <ChatImage key={u} local={u} />) : m.image_paths.map((p) => <ChatImage key={p} path={p} />)}
               </Row>
             ) : null}
-            {m.content ? (
-              <RoleplayText text={m.content} style={{ ...type.body, color: mine ? colors.userBubbleText : colors.text }} actionColor={mine ? '#3D4A1A' : colors.muted} />
+            {visibleText(m.content) ? (
+              <RoleplayText text={visibleText(m.content)} style={{ ...type.body, color: mine ? colors.userBubbleText : colors.text }} actionColor={mine ? 'rgba(255,255,255,0.72)' : colors.muted} />
             ) : m.streaming ? (
               <ActivityIndicator size="small" color={colors.muted} />
             ) : null}
+            {m.photo === 'pending' ? (
+              <View style={styles.photoPending}>
+                <ActivityIndicator size="small" color={colors.signal} />
+                <Text style={[type.small, { color: colors.signal }]}>{(speaker?.name ?? title).split(' ')[0]} está mandando uma foto…</Text>
+              </View>
+            ) : m.photo === 'failed' ? (
+              <Text style={[type.small, { marginTop: 6, color: colors.faint }]}>A foto não saiu desta vez.</Text>
+            ) : null}
+            {m.translated ? (
+              <View style={styles.translation}>
+                <Ionicons name="language-outline" size={12} color={colors.muted} />
+                <RoleplayText text={m.translated} style={{ ...type.body, fontSize: 14, color: colors.textSoft, flex: 1 }} actionColor={colors.muted} />
+              </View>
+            ) : null}
           </Pressable>
+          {!mine && (m.emotion || m.is_spontaneous) && !m.streaming ? (
+            <Row gap={6} style={{ marginTop: 4 }}>
+              {m.emotion && m.emotion !== 'neutro' ? (
+                <Text style={styles.emotion}>
+                  {EMOTION_LABELS[m.emotion].emoji} {EMOTION_LABELS[m.emotion].label}
+                </Text>
+              ) : null}
+              {m.is_spontaneous ? <Text style={[styles.emotion, { color: colors.signal }]}>✦ mandou do nada</Text> : null}
+            </Row>
+          ) : null}
           <Row gap={6} style={{ marginTop: 3, paddingHorizontal: 4 }}>
             {m.is_pinned ? <Ionicons name="pin" size={11} color={colors.accent} /> : null}
+            {!mine && !m.streaming && m.content ? (
+              <Pressable onPress={() => listen(m)} hitSlop={8} accessibilityLabel="Ouvir mensagem">
+                <Ionicons name={speakingId === m.id ? 'stop-circle-outline' : 'volume-medium-outline'} size={14} color={speakingId === m.id ? colors.signal : colors.muted} />
+              </Pressable>
+            ) : null}
             {siblings.length > 1 && !m.streaming ? (
               <Row gap={2}>
                 <Pressable disabled={idx <= 0 || busy} onPress={() => switchTo(siblings[idx - 1])} hitSlop={8}>
@@ -452,6 +673,13 @@ export default function ChatScreen() {
           ),
           headerRight: () => (
             <Row gap={0}>
+              {canCall() ? <IconButton icon="call-outline" size={20} onPress={startCall} label="Chamada de voz" /> : null}
+              <IconButton
+                icon={autoVoice ? 'volume-high' : 'volume-mute-outline'}
+                size={20}
+                onPress={() => void ensureVoice().then((ok) => ok && setAutoVoice((v) => !v))}
+                label={autoVoice ? 'Desligar leitura em voz alta' : 'Ler respostas em voz alta'}
+              />
               <IconButton icon="search" size={20} onPress={() => setSearchOpen(true)} label="Pesquisar" />
               <IconButton icon="options-outline" size={21} onPress={() => setSettings(true)} label="Ajustes da conversa" />
             </Row>
@@ -544,7 +772,7 @@ export default function ChatScreen() {
                 <Ionicons name="stop" size={18} color={colors.text} />
               </Pressable>
             ) : (
-              <Pressable onPress={send} disabled={!text.trim() && !images.length} style={[styles.sendBtn, !text.trim() && !images.length && { opacity: 0.4 }]} accessibilityLabel="Enviar">
+              <Pressable onPress={() => void send()} disabled={!text.trim() && !images.length} style={[styles.sendBtn, !text.trim() && !images.length && { opacity: 0.4 }]} accessibilityLabel="Enviar">
                 <Ionicons name="arrow-up" size={20} color={colors.accentInk} />
               </Pressable>
             )}
@@ -554,6 +782,24 @@ export default function ChatScreen() {
       </View>
 
       <ActionSheet visible={Boolean(menuFor)} onClose={() => setMenuFor(null)} actions={menuFor ? menuActions(menuFor) : []} />
+
+      {call !== 'off' ? (
+        <View style={styles.call}>
+          <View style={styles.callArt}>
+            <CoverArt c={{ name: title, avatar_path: meta.character?.avatar_path ?? null }} initialSize={80} />
+          </View>
+          <Text style={[type.h1, { marginTop: space.lg }]}>{title}</Text>
+          <Text style={[type.body, { color: colors.signal, marginTop: space.xs }]}>
+            {call === 'listening' ? 'Ouvindo você…' : call === 'thinking' ? 'Pensando…' : 'Falando…'}
+          </Text>
+          <Text style={[type.small, { marginTop: space.md, minHeight: 40, textAlign: 'center', maxWidth: 420 }]} numberOfLines={3}>
+            {call === 'listening' ? heard || 'Pode falar.' : ''}
+          </Text>
+          <Pressable onPress={endCall} style={styles.hangup} accessibilityLabel="Encerrar chamada">
+            <Ionicons name="call" size={26} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
+          </Pressable>
+        </View>
+      ) : null}
 
       <ActionSheet
         visible={Boolean(deleting)}
@@ -603,7 +849,37 @@ export default function ChatScreen() {
           onChange={(v) => updateConversation({ creativity: Number(v) })}
           options={CREATIVITY.map((c) => ({ value: c.value, label: c.label }))}
         />
+        <Text style={[type.tiny, { marginTop: space.lg, marginBottom: space.sm }]}>Vida própria</Text>
+        <Segmented
+          value={meta.conversation.proactive_mode ?? 'off'}
+          onChange={(v) => void setProactive(v)}
+          options={[
+            { value: 'off', label: 'Desligada' },
+            { value: 'sometimes', label: 'Às vezes' },
+            { value: 'often', label: 'Sempre que der' },
+          ]}
+        />
+        <Text style={[type.small, { marginTop: space.xs }]}>
+          {meta.conversation.proactive_mode === 'off'
+            ? `${title.split(' ')[0]} só fala quando você falar.`
+            : `${title.split(' ')[0]} pode mandar mensagem, foto ou contar algo que aconteceu quando você sumir (entre 8h e 23h). Nunca duas seguidas sem você responder.`}
+        </Text>
+        {meta.conversation.proactive_mode !== 'off' ? (
+          <Row gap={space.sm} style={{ marginTop: space.sm, flexWrap: 'wrap' }}>
+            <Chip label="Testar agora" icon="sparkles" onPress={nudge} />
+            {pushSupported() && pushState !== 'on' ? <Chip label="Avisar no navegador" icon="notifications-outline" onPress={turnOnPush} /> : null}
+            {pushState === 'on' ? <Chip label="Notificações ligadas" icon="notifications" active onPress={() => {}} /> : null}
+          </Row>
+        ) : null}
+        <Text style={[type.tiny, { marginTop: space.lg, marginBottom: space.sm }]}>Idioma das respostas</Text>
+        <ChipScroller>
+          {LANGUAGES.map((l) => (
+            <Chip key={l.label} label={l.label} active={(meta.conversation.language ?? '') === l.value} onPress={() => updateConversation({ language: l.value || null })} />
+          ))}
+        </ChipScroller>
         <View style={{ marginTop: space.lg, gap: space.sm, marginBottom: space.lg }}>
+          <Button title="Galeria de fotos" variant="secondary" icon="images-outline" onPress={() => { setSettings(false); router.push(`/gallery/${id}`); }} />
+          <Button title="Relação" variant="secondary" icon="heart-half-outline" onPress={() => { setSettings(false); router.push(`/relationship/${id}`); }} />
           <Button title="Memórias do personagem" variant="secondary" icon="bulb-outline" onPress={() => { setSettings(false); router.push(`/memories/${id}`); }} />
           <Button
             title={meta.conversation.is_favorite ? 'Remover dos favoritos' : 'Favoritar conversa'}
@@ -663,6 +939,12 @@ const styles = StyleSheet.create({
   composer: { paddingHorizontal: space.sm, paddingTop: space.sm, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(10,10,15,0.9)', width: '100%', maxWidth: 860, alignSelf: 'center' },
   input: { flex: 1, minHeight: 44, maxHeight: 140, backgroundColor: 'rgba(26,26,37,0.95)', borderRadius: 22, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: space.lg, paddingTop: 11, paddingBottom: 11, fontSize: 15 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  photoPending: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8 },
+  translation: { flexDirection: 'row', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  emotion: { color: colors.muted, fontSize: 11, backgroundColor: 'rgba(18,23,56,0.85)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, overflow: 'hidden' },
+  call: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(3,4,26,0.96)', alignItems: 'center', justifyContent: 'center', padding: space.xl },
+  callArt: { width: 160, height: 160, borderRadius: 80, overflow: 'hidden', borderWidth: 3, borderColor: colors.accent },
+  hangup: { marginTop: space.xxl, width: 68, height: 68, borderRadius: 34, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
   side: { width: 300, padding: space.lg, borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(10,10,15,0.55)' },
   sideArt: { width: '100%', aspectRatio: 0.75, borderRadius: radius.xl, overflow: 'hidden' },
   removeImg: { position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },

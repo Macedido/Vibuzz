@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useState } from 'react';
 import { Text } from 'react-native';
+import { GoogleButton } from '@/components/google-button';
 import { Banner, Button, Field, Screen } from '@/components/ui';
 import { supabase } from '@/lib/supabase';
 import { space, type } from '@/lib/theme';
@@ -42,6 +43,7 @@ export default function SignIn() {
       <Text style={[type.h1, { marginBottom: space.xl }]}>Bem-vindo de volta</Text>
       {error ? <Banner tone="danger" text={error} /> : null}
       {info ? <Banner text={info} /> : null}
+      <GoogleButton onError={setError} divider="ou entre com e-mail" />
       <Field label="E-mail" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
       <Field label="Senha" value={password} onChangeText={setPassword} secureTextEntry autoComplete="password" onSubmitEditing={submit} />
       <Button title="Entrar" onPress={submit} loading={loading} disabled={!email || !password} style={{ marginTop: space.sm }} />

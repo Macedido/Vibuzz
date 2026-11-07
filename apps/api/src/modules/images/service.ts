@@ -57,8 +57,23 @@ export class ImageService {
   /** Generates a portrait and stores it under "<userId>/characters/". Returns the storage path. */
   async generatePortrait(sheet: CharacterSheet, style: PortraitStyle, userId: string): Promise<{ path: string; prompt: string }> {
     const prompt = await this.portraitPrompt(sheet, style, userId);
+    return { path: await this.render(prompt, 'media', `${userId}/characters/ai`, 768, 1024), prompt };
+  }
+
+  /**
+   * A photo the character sends in the chat ("[foto: ...]"). The character's look is
+   * added so the same person appears across photos; stored in the private chat bucket.
+   */
+  async generateChatPhoto(opts: { userId: string; conversationId: string; description: string; sheet: CharacterSheet; style?: PortraitStyle }): Promise<string> {
+    const look = [opts.sheet.mode === 'narrator' ? '' : opts.sheet.appearance, opts.sheet.universe].filter(Boolean).join('. ').slice(0, 360);
+    const minor = sheetSuggestsMinor(opts.sheet) ? 'age-appropriate, non-suggestive, ' : '';
+    const prompt = `${opts.description.slice(0, 400)}. ${look ? `Character look: ${look}. ` : ''}${minor}${PORTRAIT_STYLES[opts.style ?? 'anime']}, ${SAFE}`;
+    return this.render(prompt, 'chat', `${opts.userId}/${opts.conversationId}/foto`, 832, 1040);
+  }
+
+  private async render(prompt: string, bucket: 'media' | 'chat', prefix: string, width: number, height: number): Promise<string> {
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const url = `${this.opts.baseUrl}/prompt/${encodeURIComponent(prompt)}?width=768&height=1024&nologo=true&safe=true&model=flux&seed=${seed}`;
+    const url = `${this.opts.baseUrl}/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&safe=true&model=flux&seed=${seed}`;
     const doFetch = this.opts.fetch ?? fetch;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 100_000);
@@ -75,10 +90,27 @@ export class ImageService {
     }
     const mime = imageMime(bytes);
     if (!mime || bytes.byteLength < 2000 || bytes.byteLength > 8_000_000) throw new AppError(502, 'image_failed', 'O gerador devolveu uma imagem inválida. Tente de novo.');
-    const path = `${userId}/characters/ai-${Date.now().toString(36)}-${seed.toString(36)}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}`;
-    const { error } = await this.db.storage.from('media').upload(path, bytes, { contentType: mime, upsert: false });
+    const path = `${prefix}-${Date.now().toString(36)}-${seed.toString(36)}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}`;
+    const { error } = await this.db.storage.from(bucket).upload(path, bytes, { contentType: mime, upsert: false });
     if (error) throw new AppError(500, 'upload_failed', 'Falha ao salvar a imagem gerada.');
-    return { path, prompt };
+    return path;
+  }
+
+  /** Photos generated today in this user's conversations (plan limit). */
+  async photosToday(userId: string): Promise<number> {
+    const since = new Date();
+    since.setUTCHours(0, 0, 0, 0);
+    const { data: convs } = await this.db.from('conversations').select('id').eq('user_id', userId).gte('last_message_at', since.toISOString()).limit(300);
+    const ids = (convs ?? []).map((c: { id: string }) => c.id);
+    if (!ids.length) return 0;
+    const { count } = await this.db
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .in('conversation_id', ids)
+      .eq('role', 'assistant')
+      .gte('created_at', since.toISOString())
+      .neq('image_paths', '{}');
+    return count ?? 0;
   }
 }
 

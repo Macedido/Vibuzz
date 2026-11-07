@@ -124,8 +124,10 @@ export function Button({
   disabled,
   small,
   style,
+  label,
 }: {
   title: string;
+  label?: string;
   onPress?: () => void;
   variant?: ButtonVariant;
   icon?: IconName;
@@ -141,6 +143,7 @@ export function Button({
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityRole="button"
+      accessibilityLabel={label ?? title}
       style={({ pressed }) => [
         styles.button,
         small && styles.buttonSmall,
@@ -155,7 +158,7 @@ export function Button({
       ) : (
         <Row gap={6} style={{ justifyContent: 'center' }}>
           {icon ? <Ionicons name={icon} size={small ? 15 : 18} color={fg} /> : null}
-          <Text style={{ color: fg, fontWeight: '700', fontSize: small ? 13 : 15 }}>{title}</Text>
+          {title ? <Text style={{ color: fg, fontWeight: '700', fontSize: small ? 13 : 15 }}>{title}</Text> : null}
         </Row>
       )}
     </Pressable>
@@ -241,7 +244,14 @@ export function ToggleRow({ title, subtitle, value, onChange, disabled }: { titl
         <Text style={type.h3}>{title}</Text>
         {subtitle ? <Text style={[type.small, { marginTop: 2 }]}>{subtitle}</Text> : null}
       </View>
-      <Switch value={value} onValueChange={onChange} disabled={disabled} trackColor={{ true: colors.accent, false: colors.overlay }} thumbColor={value ? colors.accentInk : colors.muted} />
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        disabled={disabled}
+        trackColor={{ true: colors.accent, false: colors.overlay }}
+        thumbColor={value ? colors.accentInk : colors.muted}
+        {...({ activeThumbColor: colors.accentInk, activeTrackColor: colors.accent } as object)}
+      />
     </Row>
   );
 }

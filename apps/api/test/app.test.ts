@@ -31,6 +31,7 @@ function fakeServices(overrides: Partial<Record<string, unknown>> = {}) {
     },
     worker: { drain: vi.fn(async () => 2) },
     maintenance: vi.fn(async () => {}),
+    life: { runDue: vi.fn(async () => 1) },
     flushUsage: vi.fn(async () => {}),
     kick: vi.fn(),
     ...overrides,
@@ -103,7 +104,7 @@ describe('HTTP API', () => {
     const app = buildApp(s);
     expect((await app.request('/v1/internal/tick', { method: 'POST', headers: { 'x-cron-token': 'wrong' } })).status).toBe(401);
     const ok = await app.request('/v1/internal/tick', { method: 'POST', headers: { 'x-cron-token': 'cron-ok' } });
-    expect(await ok.json()).toEqual({ processed: 2 });
+    expect(await ok.json()).toEqual({ processed: 2, spontaneous: 1 });
     expect(s.maintenance).toHaveBeenCalled();
   });
 

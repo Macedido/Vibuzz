@@ -1,12 +1,17 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import * as Linking from 'expo-linking';
 import { Alert, Platform, Text, TextInput, View } from 'react-native';
 import { Avatar, Banner, Button, Card, IconButton, ListItem, Panel, Row, Screen, Section, ToggleRow } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useQuery } from '@/lib/hooks';
+import { checkNotifications, disableNativeNotifications, enableNativeNotifications, nativeNotificationsOn, nativeNotificationsSupported } from '@/lib/native-notify';
+import { canInstall, disablePush, enablePush, isPushOn, onInstallAvailable, promptInstall, pushSupported } from '@/lib/pwa';
 import { supabase } from '@/lib/supabase';
 import { colors, radius, space, type } from '@/lib/theme';
+
+const APK_URL = 'https://github.com/Macedido/Vibuzz/releases/latest/download/vibuzz.apk';
 
 interface Status {
   chat: boolean;
@@ -40,9 +45,56 @@ export default function Settings() {
       setError(errorMessage(e));
     }
   };
-  const setSpontaneous = async (v: boolean) => {
-    await supabase.from('users').update({ spontaneous_messages: v }).eq('id', userId!);
+  const setFlag = async (column: 'spontaneous_messages' | 'voice_enabled' | 'private_mode', v: boolean) => {
+    setError(null);
+    const { error: e } = await supabase.from('users').update({ [column]: v }).eq('id', userId!);
+    if (e) setError('Não foi possível salvar agora.');
     await refresh();
+  };
+
+  // Notifications on this device: Web Push in the browser / installed site, background checks in the app.
+  const native = nativeNotificationsSupported();
+  const webPush = pushSupported();
+  const [notifOn, setNotifOn] = useState(false);
+  const [notifBusy, setNotifBusy] = useState(false);
+  const [notifMsg, setNotifMsg] = useState<string | null>(null);
+  const [installable, setInstallable] = useState(canInstall());
+  useEffect(() => {
+    void (native ? nativeNotificationsOn() : isPushOn()).then(setNotifOn).catch(() => {});
+    return onInstallAvailable(() => setInstallable(true));
+  }, [native]);
+  const toggleNotifications = async (v: boolean) => {
+    setNotifBusy(true);
+    setNotifMsg(null);
+    try {
+      if (v) {
+        const r = native ? await enableNativeNotifications() : await enablePush();
+        setNotifOn(r === 'on');
+        if (r === 'denied') setNotifMsg('Permissão negada. Libere as notificações do Vibuzz nas configurações do aparelho/navegador.');
+        if (r === 'unsupported') setNotifMsg('Este navegador não aceita notificações. No iPhone, adicione o site à Tela de Início primeiro.');
+        if (r === 'on' && !account?.spontaneous_messages) await setFlag('spontaneous_messages', true);
+      } else {
+        if (native) await disableNativeNotifications();
+        else await disablePush();
+        setNotifOn(false);
+      }
+    } catch (e) {
+      setNotifMsg(errorMessage(e));
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+  const testNotification = async () => {
+    setNotifMsg(null);
+    try {
+      const r = await api<{ delivered: number }>('/v1/push/test', { body: {} });
+      if (native) {
+        const shown = await checkNotifications();
+        setNotifMsg(shown ? 'Pronto! Olhe a barra de notificações.' : 'Teste criado. Ele aparece na próxima checagem.');
+      } else setNotifMsg(r.delivered ? 'Enviada! Deve aparecer em alguns segundos.' : 'Nenhum navegador inscrito ainda. Desligue e ligue de novo.');
+    } catch (e) {
+      setNotifMsg(errorMessage(e));
+    }
   };
 
   const deleteAccount = async () => {
@@ -75,6 +127,50 @@ export default function Settings() {
           <ListItem icon="notifications-outline" title="Notificações" onPress={() => router.push('/notifications')} />
         </Section>
 
+        <Section title="Vida própria e voz">
+          <ToggleRow
+            title="Mensagens espontâneas"
+            subtitle="Personagens podem mandar mensagem sozinhos nas conversas em que você ligar “Vida própria”. Só entre 8h e 22h, com limite diário."
+            value={Boolean(account?.spontaneous_messages)}
+            onChange={(v) => setFlag('spontaneous_messages', v)}
+          />
+          <ToggleRow
+            title="Voz dos personagens"
+            subtitle="Permite ouvir as respostas em voz alta e fazer chamadas de voz. Cada personagem tem a própria voz."
+            value={Boolean(account?.voice_enabled)}
+            onChange={(v) => setFlag('voice_enabled', v)}
+          />
+        </Section>
+
+        <Section title="Notificações neste aparelho">
+          {native || webPush ? (
+            <>
+              <ToggleRow
+                title={native ? 'Notificações do app' : 'Notificações do navegador'}
+                subtitle={native ? 'Avisa quando um personagem manda mensagem, mesmo com o app fechado (o Android checa a cada ~15 min).' : 'Avisa na hora quando um personagem manda mensagem, mesmo com a aba fechada.'}
+                value={notifOn}
+                onChange={toggleNotifications}
+                disabled={notifBusy}
+              />
+              {notifOn ? <Button title="Mandar notificação de teste" small variant="secondary" icon="paper-plane-outline" onPress={testNotification} style={{ alignSelf: 'flex-start', marginTop: space.sm }} /> : null}
+            </>
+          ) : (
+            <Text style={type.small}>Este navegador não aceita notificações. Use o Chrome, ou instale o app.</Text>
+          )}
+          {notifMsg ? <Text style={[type.small, { marginTop: space.sm, color: colors.signal }]}>{notifMsg}</Text> : null}
+          {Platform.OS === 'web' ? (
+            <View style={{ marginTop: space.md }}>
+              {installable ? <ListItem icon="download-outline" title="Instalar o Vibuzz" subtitle="Abre como app, com ícone na tela inicial" onPress={() => void promptInstall().then(() => setInstallable(false))} /> : null}
+              <ListItem icon="logo-android" title="Baixar APK para Android" subtitle="Versão nativa com notificações" onPress={() => Linking.openURL(APK_URL)} />
+            </View>
+          ) : null}
+        </Section>
+
+        <Section title="Seu plano">
+          <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={account?.plan === 'premium' ? 'Ativo' : account?.premium_waitlist ? 'Você está na lista de espera' : 'Compare os planos'} onPress={() => router.push('/premium')} />
+          <ListItem icon="trophy-outline" title="Conquistas" onPress={() => router.push('/achievements')} />
+        </Section>
+
         <Section title="Conteúdo e privacidade">
           <ToggleRow
             title="Conteúdo adulto (18+)"
@@ -84,10 +180,10 @@ export default function Settings() {
             disabled={!isAdult}
           />
           <ToggleRow
-            title="Mensagens espontâneas"
-            subtitle="Em breve: permitir que personagens mandem novidades por conta própria. Desligado por padrão; nada é enviado sem sua permissão."
-            value={Boolean(account?.spontaneous_messages)}
-            onChange={setSpontaneous}
+            title="Modo privado"
+            subtitle="Suas coleções somem do perfil público e suas conversas e curtidas não contam nos rankings."
+            value={Boolean(account?.private_mode)}
+            onChange={(v) => setFlag('private_mode', v)}
           />
           <Text style={[type.tiny, { marginTop: space.md, marginBottom: space.sm }]}>Usuários bloqueados</Text>
           {blocked.data?.length ? (

@@ -1,3 +1,4 @@
+import type { Emotion } from '@vibuzz/shared';
 export interface CharacterCard {
   id: string;
   kind: 'single' | 'group';
@@ -53,6 +54,9 @@ export interface PathMessage {
   status: 'complete' | 'streaming' | 'error';
   is_pinned: boolean;
   created_at: string;
+  emotion?: Emotion | null;
+  is_spontaneous?: boolean;
+  translations?: Record<string, string> | null;
   sibling_ids: string[];
 }
 
