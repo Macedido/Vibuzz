@@ -6,6 +6,7 @@ import { truncate } from '../../lib/json';
 import { assertOwnedPath, type StorageService } from '../../lib/storage';
 import type { IntelligenceEngine } from '../intelligence/engine';
 import { toApiMessage } from '../intelligence/engine';
+import { fillPlaceholders } from '../intelligence/prompts';
 import type { MemoryService } from '../memory/service';
 import type { ModerationService } from '../moderation/service';
 import { analysisToNote, type VisionService } from '../vision/service';
@@ -13,9 +14,7 @@ import type { Repo } from './repo';
 
 type Emit = (e: StreamEvent) => void;
 
-export function fillPlaceholders(text: string, userName: string, charName: string): string {
-  return text.replace(/\{\{\s*user\s*\}\}/gi, userName).replace(/\{\{\s*char\s*\}\}/gi, charName);
-}
+export { fillPlaceholders };
 
 export class ConversationService {
   constructor(
