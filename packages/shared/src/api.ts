@@ -40,6 +40,12 @@ export const regenerateFieldSchema = z.object({
   guidance: z.string().max(1000).optional(),
 });
 
+export const PORTRAIT_STYLE_IDS = ['anime', 'realista', '3d', 'fantasia'] as const;
+export const portraitSchema = z.object({
+  sheet: characterSheetSchema,
+  style: z.enum(PORTRAIT_STYLE_IDS).default('anime'),
+});
+
 export const visionAnalyzeSchema = z.object({
   path: z.string().max(400),
   bucket: z.enum(['media', 'chat']).default('media'),
