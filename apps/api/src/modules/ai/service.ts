@@ -11,12 +11,13 @@ import type { Capability, ChatProvider, ChatRequest, ChatResult, ModelRef, Moder
 export const EMBEDDING_DIMENSIONS = 1536;
 
 /** Keyless free models (OVHcloud AI Endpoints anonymous tier, Pollinations). Limits are per IP and per model. */
+/** Ordered by roleplay quality in our evals (Portuguese, narrator scenes, staying in role). */
 export const FREE_ADVANCED = [
   'ovh:Meta-Llama-3_3-70B-Instruct',
-  'ovh:Mistral-Small-3.2-24B-Instruct-2506',
   'ovh:gpt-oss-120b',
-  'ovh:Qwen3.6-27B',
   'ovh:Qwen3.5-397B-A17B',
+  'ovh:Qwen3.6-27B',
+  'ovh:Mistral-Small-3.2-24B-Instruct-2506',
   'pollinations:openai',
 ] as const;
 export const FREE_FAST = [
