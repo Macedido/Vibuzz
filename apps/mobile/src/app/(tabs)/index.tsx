@@ -1,158 +1,251 @@
 import { CATEGORIES } from '@vibuzz/shared';
 import { useRouter } from 'expo-router';
-import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { HeroCard, Rail } from '@/components/character-card';
-import { Avatar, Chip, ChipScroller, EmptyState, ErrorState, IconButton, Loading, Row, Screen, Section, TopBar } from '@/components/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CharacterGrid, CoverArt } from '@/components/character-card';
+import { EmptyState, ErrorState, IconButton, Ionicons, Row } from '@/components/ui';
+import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
 import { colors, radius, space, type } from '@/lib/theme';
 import { timeAgo, type CharacterCard, type ConversationItem } from '@/lib/types';
 
-async function loadHome() {
-  const discover = (args: Record<string, unknown>) => supabase.rpc('discover_characters', { p_limit: 12, ...args });
-  const [rec, trending, popular, recent, following, groups, convs, unread] = await Promise.all([
-    supabase.rpc('recommend_characters', { p_limit: 12 }),
-    discover({ p_sort: 'trending' }),
-    discover({ p_sort: 'popular' }),
-    discover({ p_sort: 'recent' }),
-    discover({ p_sort: 'recent', p_following_only: true }),
-    discover({ p_sort: 'popular', p_kind: 'group' }),
+const PAGE = 30;
+
+type Feed = 'foryou' | 'trending' | 'recent' | 'popular' | 'groups' | 'following';
+const FEEDS: { id: Feed; label: string }[] = [
+  { id: 'foryou', label: 'Para você' },
+  { id: 'trending', label: 'Em alta' },
+  { id: 'recent', label: 'Novos' },
+  { id: 'popular', label: 'Populares' },
+  { id: 'groups', label: 'Grupos' },
+  { id: 'following', label: 'Seguindo' },
+];
+
+function dedupe(rows: CharacterCard[]): CharacterCard[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+}
+
+async function loadFeed(feed: Feed, category: string | null, offset: number): Promise<{ rows: CharacterCard[]; more: boolean }> {
+  const discover = async (args: Record<string, unknown>) =>
+    (unwrap(await supabase.rpc('discover_characters', { p_limit: PAGE, p_offset: offset, p_category: category, ...args })) as CharacterCard[]) ?? [];
+  if (feed === 'foryou') {
+    if (offset > 0) {
+      const rows = await discover({ p_sort: 'popular' });
+      return { rows, more: rows.length === PAGE };
+    }
+    // Personal picks first, then what is hot and what just arrived, so new characters always show up.
+    const [rec, trending, recent] = await Promise.all([
+      category ? Promise.resolve([] as CharacterCard[]) : supabase.rpc('recommend_characters', { p_limit: 12 }).then((r) => (r.data as CharacterCard[]) ?? []),
+      discover({ p_sort: 'trending' }),
+      discover({ p_sort: 'recent' }),
+    ]);
+    const rows = dedupe([...rec, ...trending, ...recent]);
+    return { rows, more: rows.length >= PAGE };
+  }
+  const args: Record<Feed, Record<string, unknown>> = {
+    foryou: {},
+    trending: { p_sort: 'trending' },
+    recent: { p_sort: 'recent' },
+    popular: { p_sort: 'popular' },
+    groups: { p_sort: 'popular', p_kind: 'group' },
+    following: { p_sort: 'recent', p_following_only: true },
+  };
+  const rows = await discover(args[feed]);
+  return { rows, more: rows.length === PAGE };
+}
+
+async function loadTop() {
+  const [convs, unread] = await Promise.all([
     supabase
       .from('conversations')
-      .select('id, title, character_id, last_message_at, last_message_preview, character:characters(id, name, avatar_path, kind)')
+      .select('id, title, character_id, last_message_at, last_message_preview, character:characters!conversations_character_id_fkey(id, name, avatar_path, kind)')
       .eq('is_archived', false)
       .order('last_message_at', { ascending: false })
-      .limit(8),
+      .limit(12),
     supabase.from('notifications').select('id', { count: 'exact', head: true }).is('read_at', null),
   ]);
-  return {
-    recommended: unwrap(rec) as CharacterCard[],
-    trending: unwrap(trending) as CharacterCard[],
-    popular: unwrap(popular) as CharacterCard[],
-    recent: unwrap(recent) as CharacterCard[],
-    following: unwrap(following) as CharacterCard[],
-    groups: unwrap(groups) as CharacterCard[],
-    conversations: (unwrap(convs) as unknown as ConversationItem[]) ?? [],
-    unread: unread.count ?? 0,
-  };
+  return { conversations: (unwrap(convs) as unknown as ConversationItem[]) ?? [], unread: unread.count ?? 0 };
+}
+
+function ContinueCard({ c }: { c: ConversationItem }) {
+  const router = useRouter();
+  const name = c.character?.name ?? c.title;
+  return (
+    <Pressable onPress={() => router.push(`/chat/${c.id}`)} style={({ pressed }) => [styles.cont, pressed && { opacity: 0.85 }]}>
+      <View style={styles.contThumb}>
+        <CoverArt c={{ name, avatar_path: c.character?.avatar_path ?? null }} initialSize={20} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={type.h3} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={[type.small, { fontSize: 12 }]} numberOfLines={1}>
+          {c.last_message_preview || 'Continuar história'}
+        </Text>
+        <Text style={[type.small, { fontSize: 11, color: colors.faint }]}>{timeAgo(c.last_message_at)}</Text>
+      </View>
+    </Pressable>
+  );
 }
 
 export default function Home() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { profile } = useAuth();
-  const q = useQuery(loadHome, [], { refetchOnFocus: true });
+  const top = useQuery(loadTop, [], { refetchOnFocus: true });
+  const [feed, setFeed] = useState<Feed>('foryou');
+  const [category, setCategory] = useState<string | null>(null);
+  const [items, setItems] = useState<CharacterCard[]>([]);
+  const [more, setMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const header = (
-    <TopBar
-      title="Vibuzz"
-      subtitle={profile ? `Oi, ${profile.display_name.split(' ')[0]}` : undefined}
-      right={<IconButton icon="notifications-outline" badge={(q.data?.unread ?? 0) > 0} onPress={() => router.push('/notifications')} label="Notificações" />}
-    />
+  const load = useCallback(
+    async (offset: number) => {
+      setError(null);
+      if (offset === 0) setLoading(true);
+      try {
+        const res = await loadFeed(feed, category, offset);
+        setItems((prev) => (offset ? dedupe([...prev, ...res.rows]) : res.rows));
+        setMore(res.more);
+      } catch (e) {
+        setError(errorMessage(e));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [feed, category],
   );
 
-  if (q.loading)
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        {header}
-        <Loading />
-      </View>
-    );
-  if (q.error || !q.data)
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.bg }}>
-        {header}
-        <ErrorState message={q.error ?? 'Erro'} onRetry={q.refresh} />
-      </View>
-    );
+  useEffect(() => {
+    void load(0);
+  }, [load]);
 
-  const d = q.data;
-  const hero = d.recommended[0] ?? d.trending[0] ?? d.popular[0];
-  const nothing = !hero && !d.conversations.length;
+  const refresh = () => {
+    setRefreshing(true);
+    top.refresh();
+    void load(0);
+  };
+
+  const convs = top.data?.conversations ?? [];
+  const firstName = profile?.display_name?.split(' ')[0];
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      {header}
-      <Screen padded={false} style={{ paddingHorizontal: space.lg }} refreshControl={<RefreshControl refreshing={q.refreshing} onRefresh={q.refresh} tintColor={colors.accent} />}>
-        {nothing ? (
-          <EmptyState
-            icon="planet-outline"
-            title="O universo está começando"
-            message="Ainda não há personagens públicos. Que tal criar o primeiro?"
-            action="Criar personagem"
-            onAction={() => router.push('/create')}
-          />
+      <View style={[styles.header, { paddingTop: insets.top + space.sm }]}>
+        <Row gap={space.sm} style={{ flexShrink: 0 }}>
+          <View style={styles.logo}>
+            <Text style={styles.logoText}>V</Text>
+          </View>
+          <Text style={styles.brand}>Vibuzz</Text>
+        </Row>
+        <Pressable onPress={() => router.push('/discover')} style={styles.search} accessibilityRole="search">
+          <Ionicons name="search" size={17} color={colors.muted} />
+          <Text style={[type.small, { color: colors.faint }]} numberOfLines={1}>
+            Buscar personagens, #tags, @criadores
+          </Text>
+        </Pressable>
+        <IconButton icon="notifications-outline" badge={(top.data?.unread ?? 0) > 0} onPress={() => router.push('/notifications')} label="Notificações" />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: space.lg, paddingBottom: insets.bottom + 96 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />}
+        stickyHeaderIndices={convs.length ? [2] : [1]}
+      >
+        <Text style={[type.small, { marginTop: space.xs }]}>{firstName ? `Oi, ${firstName}! Com quem vai ser hoje?` : 'Com quem vai ser hoje?'}</Text>
+
+        {convs.length ? (
+          <View style={{ marginTop: space.lg }}>
+            <Row style={{ justifyContent: 'space-between', marginBottom: space.sm }}>
+              <Text style={type.h2}>Continue de onde parou</Text>
+              <Pressable onPress={() => router.push('/chats')} hitSlop={10}>
+                <Text style={{ color: colors.accent, fontWeight: '600' }}>Ver todas</Text>
+              </Pressable>
+            </Row>
+            <FlatList
+              horizontal
+              data={convs}
+              keyExtractor={(c) => c.id}
+              renderItem={({ item }) => <ContinueCard c={item} />}
+              ItemSeparatorComponent={() => <View style={{ width: space.sm }} />}
+              showsHorizontalScrollIndicator={false}
+            />
+          </View>
         ) : null}
 
-        {hero ? <View style={{ marginTop: space.md }}><HeroCard c={hero} /></View> : null}
-
-        {d.conversations.length ? (
-          <Section title="Continue suas conversas" action="Ver todas" onAction={() => router.push('/chats')}>
-            <View style={{ gap: space.sm }}>
-              {d.conversations.slice(0, 4).map((c) => (
-                <Pressable key={c.id} onPress={() => router.push(`/chat/${c.id}`)} style={({ pressed }) => [styles.convRow, pressed && { backgroundColor: colors.raised }]}>
-                  <Avatar path={c.character?.avatar_path} name={c.character?.name ?? c.title} size={42} />
-                  <View style={{ flex: 1 }}>
-                    <Row style={{ justifyContent: 'space-between' }}>
-                      <Text style={type.h3} numberOfLines={1}>
-                        {c.character?.name ?? c.title}
-                      </Text>
-                      <Text style={type.small}>{timeAgo(c.last_message_at)}</Text>
-                    </Row>
-                    <Text style={type.small} numberOfLines={1}>
-                      {c.last_message_preview}
-                    </Text>
-                  </View>
-                </Pressable>
-              ))}
-            </View>
-          </Section>
-        ) : null}
-
-        {d.recommended.length > 1 ? (
-          <Section title="Recomendados para você">
-            <Rail items={d.recommended.slice(1)} />
-          </Section>
-        ) : null}
-        {d.trending.length ? (
-          <Section title="Em alta" action="Mais" onAction={() => router.push({ pathname: '/discover', params: { sort: 'trending' } })}>
-            <Rail items={d.trending} />
-          </Section>
-        ) : null}
-        {d.following.length ? (
-          <Section title="De criadores que você segue">
-            <Rail items={d.following} />
-          </Section>
-        ) : null}
-
-        <Section title="Categorias">
-          <ChipScroller>
-            {CATEGORIES.map((c) => (
-              <Chip key={c.slug} label={c.name} onPress={() => router.push({ pathname: '/discover', params: { category: c.slug } })} />
+        <View style={styles.tabsWrap}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.xs, paddingRight: space.lg }}>
+            {FEEDS.map((f) => (
+              <Pressable key={f.id} onPress={() => setFeed(f.id)} style={[styles.tab, feed === f.id && styles.tabActive]}>
+                <Text style={[styles.tabText, feed === f.id && styles.tabTextActive]}>{f.label}</Text>
+              </Pressable>
             ))}
-          </ChipScroller>
-        </Section>
+            <View style={styles.divider} />
+            {CATEGORIES.map((c) => (
+              <Pressable key={c.slug} onPress={() => setCategory(category === c.slug ? null : c.slug)} style={[styles.cat, category === c.slug && styles.catActive]}>
+                <Text style={[styles.catText, category === c.slug && { color: colors.accentInk }]}>{c.name}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
 
-        {d.popular.length ? (
-          <Section title="Populares" action="Mais" onAction={() => router.push({ pathname: '/discover', params: { sort: 'popular' } })}>
-            <Rail items={d.popular} />
-          </Section>
-        ) : null}
-        {d.groups.length ? (
-          <Section title="Universos em grupo" action="Mais" onAction={() => router.push({ pathname: '/discover', params: { kind: 'group' } })}>
-            <Rail items={d.groups} />
-          </Section>
-        ) : null}
-        {d.recent.length ? (
-          <Section title="Novos" action="Mais" onAction={() => router.push({ pathname: '/discover', params: { sort: 'recent' } })}>
-            <Rail items={d.recent} />
-          </Section>
-        ) : null}
-      </Screen>
+        {error ? (
+          <ErrorState message={error} onRetry={() => load(0)} />
+        ) : loading ? (
+          <ActivityIndicator color={colors.accent} style={{ marginTop: space.xxl }} />
+        ) : !items.length ? (
+          feed === 'following' ? (
+            <EmptyState icon="people-outline" title="Ninguém por aqui" message="Siga criadores para ver os personagens novos deles aqui." />
+          ) : (
+            <EmptyState
+              icon="planet-outline"
+              title={category ? 'Nada nessa categoria ainda' : 'O universo está começando'}
+              message="Crie um personagem público e ele aparece aqui para todo mundo."
+              action="Criar personagem"
+              onAction={() => router.push('/create')}
+            />
+          )
+        ) : (
+          <CharacterGrid
+            items={items}
+            footer={
+              more ? (
+                <Pressable onPress={() => load(items.length)} style={styles.more}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>Carregar mais</Text>
+                </Pressable>
+              ) : null
+            }
+          />
+        )}
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  convRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, padding: space.sm, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft },
+  header: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingBottom: space.sm, backgroundColor: colors.bg },
+  logo: { width: 30, height: 30, borderRadius: 9, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  logoText: { color: colors.accentInk, fontWeight: '900', fontSize: 18, marginTop: -1 },
+  brand: { color: colors.text, fontWeight: '900', fontSize: 20, letterSpacing: -0.6 },
+  search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 40, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft, paddingHorizontal: space.md, maxWidth: 520 },
+  tabsWrap: { backgroundColor: colors.bg, paddingTop: space.lg, paddingBottom: space.md },
+  tab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill },
+  tabActive: { backgroundColor: colors.raised },
+  tabText: { color: colors.muted, fontWeight: '700', fontSize: 14 },
+  tabTextActive: { color: colors.text },
+  divider: { width: 1, height: 22, backgroundColor: colors.border, alignSelf: 'center', marginHorizontal: space.xs },
+  cat: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border },
+  catActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  catText: { color: colors.textSoft, fontWeight: '600', fontSize: 13 },
+  cont: { width: 240, flexDirection: 'row', alignItems: 'center', gap: space.sm, padding: space.sm, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft },
+  contThumb: { width: 52, height: 64, borderRadius: radius.md, overflow: 'hidden' },
+  more: { marginTop: space.lg, alignSelf: 'center', paddingHorizontal: space.xl, paddingVertical: space.md, borderRadius: radius.pill, backgroundColor: colors.raised },
 });
