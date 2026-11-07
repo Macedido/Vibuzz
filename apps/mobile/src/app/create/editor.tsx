@@ -3,6 +3,7 @@ import {
   characterSheetSchema,
   diffSheets,
   emptySheet,
+  PORTRAIT_STYLE_IDS,
   SHEET_FIELDS,
   type CharacterSheet,
   type Maturity,
@@ -19,6 +20,7 @@ import {
   Button,
   Card,
   Chip,
+  ChipScroller,
   Field,
   IconButton,
   Ionicons,
@@ -36,6 +38,8 @@ import { mediaUrl } from '@/lib/supabase';
 import { colors, radius, space, type } from '@/lib/theme';
 import { timeAgo } from '@/lib/types';
 import { pickImage, uploadImage } from '@/lib/upload';
+
+const PORTRAIT_LABELS: Record<(typeof PORTRAIT_STYLE_IDS)[number], string> = { anime: 'Anime', realista: 'Realista', '3d': '3D', fantasia: 'Fantasia' };
 
 type SheetKey = keyof CharacterSheet;
 const fieldMeta = new Map(SHEET_FIELDS.map((f) => [f.key, f]));
@@ -106,6 +110,7 @@ export default function Editor() {
   const [openMember, setOpenMember] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [portraitStyle, setPortraitStyle] = useState<(typeof PORTRAIT_STYLE_IDS)[number]>('anime');
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +163,20 @@ export default function Editor() {
       if (!img) return;
       setUploading(target);
       apply(await uploadImage('media', 'characters', img));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const generatePortrait = async () => {
+    if (!sheet.name.trim()) return setError('Dê um nome ao personagem antes de gerar a imagem.');
+    setError(null);
+    setUploading('portrait');
+    try {
+      const out = await api<{ path: string }>('/v1/creator/portrait', { body: { sheet: { ...sheet, name: sheet.name.trim() }, style: portraitStyle } });
+      setAvatarPath(out.path);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -292,6 +311,25 @@ export default function Editor() {
               <Field label={kind === 'group' ? 'Nome do grupo' : 'Nome'} value={sheet.name} onChangeText={set('name')} maxLength={120} placeholder="Obrigatório" />
             </View>
           </Row>
+          {kind === 'single' ? (
+            <View style={styles.portraitBox}>
+              <Row style={{ alignItems: 'flex-start' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={type.h3}>Imagem com IA</Text>
+                  <Text style={type.small}>Cria um retrato a partir da aparência (ou do cenário, no modo história). Grátis.</Text>
+                </View>
+                <Button title={avatarPath ? 'Gerar outra' : 'Gerar imagem'} icon="sparkles" small onPress={generatePortrait} loading={uploading === 'portrait'} />
+              </Row>
+              <View style={{ marginTop: space.sm }}>
+                <ChipScroller>
+                  {PORTRAIT_STYLE_IDS.map((st) => (
+                    <Chip key={st} label={PORTRAIT_LABELS[st]} active={portraitStyle === st} onPress={() => setPortraitStyle(st)} />
+                  ))}
+                </ChipScroller>
+              </View>
+              {uploading === 'portrait' ? <Text style={[type.small, { marginTop: space.sm }]}>Desenhando… pode levar até 30 segundos.</Text> : null}
+            </View>
+          ) : null}
           {sheetField('tagline', sheet.tagline, set('tagline'))}
           {kind === 'single' ? (
             <View style={{ marginBottom: space.md }}>
@@ -408,6 +446,9 @@ export default function Editor() {
                 { value: 'mature', label: '18+' },
               ]}
             />
+            {maturity === 'mature' ? (
+              <Text style={[type.small, { marginTop: space.xs }]}>Personagens 18+ só aparecem para adultos que ligaram o conteúdo 18+ em Ajustes. Para todo mundo ver, use Livre ou 13+.</Text>
+            ) : null}
             <Text style={[type.tiny, { marginTop: space.lg, marginBottom: space.sm }]}>Categoria</Text>
             <Row style={{ flexWrap: 'wrap' }}>
               {CATEGORIES.map((c) => (
@@ -496,6 +537,7 @@ function RelationsEditor({ relations, onChange }: { relations: Relation[]; onCha
 }
 
 const styles = StyleSheet.create({
+  portraitBox: { padding: space.md, borderRadius: radius.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft, marginBottom: space.lg },
   camera: { position: 'absolute', right: 0, bottom: 0, width: 30, height: 30, borderRadius: 15, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.bg },
   groupHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: space.md, borderBottomWidth: 1, borderBottomColor: colors.borderSoft },
   thumb: { width: 88, height: 88, borderRadius: radius.md },
