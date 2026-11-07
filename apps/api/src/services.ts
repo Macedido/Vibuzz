@@ -7,6 +7,7 @@ import { CharacterService } from './modules/characters/service';
 import { Repo } from './modules/conversations/repo';
 import { ConversationService } from './modules/conversations/service';
 import { CreatorService } from './modules/creator/service';
+import { ImageService } from './modules/images/service';
 import { IntelligenceEngine } from './modules/intelligence/engine';
 import { SceneService } from './modules/intelligence/scene';
 import { JobWorker } from './modules/jobs/worker';
@@ -28,6 +29,7 @@ export interface Services {
   conversations: ConversationService;
   characters: CharacterService;
   creator: CreatorService;
+  images: ImageService;
   worker: JobWorker;
   flushUsage: () => Promise<void>;
   maintenance: () => Promise<void>;
@@ -95,6 +97,7 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
   const conversations = new ConversationService(env, repo, engine, memory, moderation, vision, storage);
   const characters = new CharacterService(repo, moderation, storage, ai);
   const creator = new CreatorService(ai, vision, storage);
+  const images = new ImageService(ai, db, { baseUrl: env.POLLINATIONS_IMAGE_URL });
 
   const maintenance = async () => {
     const purged = await conversations.maintenancePurge();
@@ -135,6 +138,7 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
     conversations,
     characters,
     creator,
+    images,
     worker,
     flushUsage: usage.flush,
     maintenance: () => worker.maybeMaintain(),
