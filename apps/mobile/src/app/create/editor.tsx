@@ -44,7 +44,7 @@ const blank = (): CharacterSheet => ({ ...emptySheet('x'), name: '' });
 const GROUPS: { title: string; keys: SheetKey[] }[] = [
   { title: 'Identidade', keys: ['appearance', 'personality', 'biography', 'backstory'] },
   { title: 'Voz e comportamento', keys: ['speechStyle', 'likes', 'dislikes', 'fears', 'goals', 'habits', 'behaviors'] },
-  { title: 'Mundo e início', keys: ['universe', 'scenario', 'firstMessage'] },
+  { title: 'Mundo e início', keys: ['universe', 'scenario', 'userRole', 'firstMessage'] },
   { title: 'Avançado', keys: ['instructions'] },
 ];
 const MEMBER_KEYS: SheetKey[] = ['gender', 'age', 'tagline', 'appearance', 'personality', 'biography', 'speechStyle', 'likes', 'dislikes', 'fears', 'goals'];
@@ -140,6 +140,10 @@ export default function Editor() {
       .catch((e) => setError(errorMessage(e)))
       .finally(() => setLoading(false));
   }, [editingId]);
+
+  useEffect(() => {
+    if (sheet.mode === 'narrator') setOpen((o) => (o['Mundo e início'] ? o : { ...o, 'Mundo e início': true }));
+  }, [sheet.mode]);
 
   const set = (key: SheetKey) => (value: string) => setSheet((s) => ({ ...s, [key]: value }));
   const setMember = (i: number, patch: Partial<Member> | ((m: Member) => Member)) =>
@@ -290,6 +294,24 @@ export default function Editor() {
           </Row>
           {sheetField('tagline', sheet.tagline, set('tagline'))}
           {kind === 'single' ? (
+            <View style={{ marginBottom: space.md }}>
+              <Text style={[type.tiny, { marginBottom: space.sm }]}>Quem a IA interpreta</Text>
+              <Segmented
+                value={sheet.mode}
+                onChange={(mode) => setSheet((s) => ({ ...s, mode }))}
+                options={[
+                  { value: 'character', label: 'Este personagem' },
+                  { value: 'narrator', label: 'Narrador da história' },
+                ]}
+              />
+              <Text style={[type.small, { marginTop: space.xs }]}>
+                {sheet.mode === 'narrator'
+                  ? 'A IA narra e dá voz a todos os personagens. Você interpreta o papel descrito em “Seu papel na história” (em Mundo e início).'
+                  : 'A IA vira este personagem e conversa com você.'}
+              </Text>
+            </View>
+          ) : null}
+          {kind === 'single' && sheet.mode !== 'narrator' ? (
             <Row style={{ alignItems: 'flex-start' }}>
               <View style={{ flex: 1 }}>{sheetField('gender', sheet.gender, set('gender'), false)}</View>
               <View style={{ flex: 1 }}>{sheetField('age', sheet.age, set('age'), false)}</View>
