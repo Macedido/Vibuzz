@@ -5,6 +5,7 @@ import {
   creatorGenerateSchema,
   editMessageSchema,
   memoryUpdateSchema,
+  portraitSchema,
   profileUpdateSchema,
   regenerateFieldSchema,
   regenerateSchema,
@@ -92,6 +93,13 @@ export function registerRoutes(app: Hono<AppEnv>, s: Services, log: Logger, limi
     const verdict = await s.moderation.checkText(input.idea, 'character', { userId: uid(c), kind: 'moderation_creator' });
     if (!verdict.allowed) throw blocked(verdict.reason);
     return c.json(await s.creator.generate(input, uid(c)));
+  });
+
+  app.post('/v1/creator/portrait', async (c) => {
+    if (s.env.IMAGE_GEN === false) throw new AppError(503, 'image_disabled', 'A geração de imagens está desligada neste servidor.');
+    limit(c, 'portrait', 4);
+    const input = parse(portraitSchema, await body(c));
+    return c.json(await s.images.generatePortrait(input.sheet, input.style, uid(c)));
   });
 
   app.post('/v1/creator/regenerate-field', async (c) => {
