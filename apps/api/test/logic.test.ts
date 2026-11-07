@@ -165,3 +165,41 @@ describe('free AI support', async () => {
     expect(off.status().chat).toBe(false);
   });
 });
+
+describe('portraits (free image model)', () => {
+  it('detects real image bytes', async () => {
+    const { imageMime } = await import('../src/modules/images/service');
+    expect(imageMime(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    expect(imageMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47]))).toBe('image/png');
+    expect(imageMime(new TextEncoder().encode('{"error":"busy"}'))).toBeNull();
+  });
+
+  it('builds a safe prompt, uploads the image and returns its path', async () => {
+    const { ImageService } = await import('../src/modules/images/service');
+    const { characterSheetSchema } = await import('@vibuzz/shared');
+    const uploads: { path: string; type?: string }[] = [];
+    const db = { storage: { from: () => ({ upload: async (path: string, _b: Uint8Array, o: { contentType: string }) => (uploads.push({ path, type: o.contentType }), { error: null }) }) } };
+    const ai = { complete: async () => ({ text: '"A fox girl with white and orange hair, purple eyes, Christmas classroom"' }) };
+    let requested = '';
+    const jpeg = new Uint8Array(5000);
+    jpeg.set([0xff, 0xd8, 0xff]);
+    const fetchFn = (async (url: string) => ((requested = url), new Response(jpeg, { status: 200 }))) as unknown as typeof fetch;
+    const svc = new ImageService(ai as never, db as never, { baseUrl: 'https://img.test', fetch: fetchFn });
+    const sheet = characterSheetSchema.parse({ name: 'Lolbit', age: '15' });
+    const out = await svc.generatePortrait(sheet, 'anime', 'user-1');
+    expect(out.path).toMatch(/^user-1\/characters\/ai-.+\.jpg$/);
+    expect(uploads[0]).toEqual({ path: out.path, type: 'image/jpeg' });
+    const prompt = decodeURIComponent(requested.split('/prompt/')[1].split('?')[0]);
+    expect(prompt).toContain('A fox girl with white and orange hair');
+    expect(prompt).toContain('fully clothed');
+    expect(requested).toContain('safe=true');
+  });
+
+  it('refuses non-image answers from the generator', async () => {
+    const { ImageService } = await import('../src/modules/images/service');
+    const { characterSheetSchema } = await import('@vibuzz/shared');
+    const fetchFn = (async () => new Response('{"error":"queue full"}', { status: 200 })) as unknown as typeof fetch;
+    const svc = new ImageService({ complete: async () => ({ text: 'x' }) } as never, {} as never, { baseUrl: 'https://img.test', fetch: fetchFn });
+    await expect(svc.generatePortrait(characterSheetSchema.parse({ name: 'X' }), 'anime', 'u')).rejects.toThrow(/inválida/);
+  });
+});
