@@ -2,6 +2,7 @@ import type { StreamEvent } from '@vibuzz/shared';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -13,9 +14,11 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { CoverArt, paletteFor } from '@/components/character-card';
 import { RoleplayText } from '@/components/rich-text';
 import {
   ActionSheet,
@@ -35,7 +38,7 @@ import {
 } from '@/components/ui';
 import { api, errorMessage, stream } from '@/lib/api';
 import { unwrap } from '@/lib/hooks';
-import { chatImageUrl, supabase } from '@/lib/supabase';
+import { chatImageUrl, mediaUrl, supabase } from '@/lib/supabase';
 import { colors, radius, space, type } from '@/lib/theme';
 import type { Persona, PathMessage } from '@/lib/types';
 import { pickImage, uploadImage, type PickedImage } from '@/lib/upload';
@@ -73,6 +76,8 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
+  const wide = Platform.OS === 'web' && screenW >= 1100;
   const [meta, setMeta] = useState<Meta | null>(null);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -328,6 +333,16 @@ export default function ChatScreen() {
 
   const title = meta.character?.name ?? meta.conversation.title;
   const last = messages[messages.length - 1];
+  const backdrop = mediaUrl(meta.character?.avatar_path);
+  /** Web: Enter sends, Shift+Enter breaks the line. */
+  const onKeyPress = (e: { nativeEvent: unknown; preventDefault: () => void }) => {
+    if (Platform.OS !== 'web') return;
+    const ev = e.nativeEvent as { key?: string; shiftKey?: boolean; isComposing?: boolean };
+    if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing) {
+      e.preventDefault();
+      if (!busy && (text.trim() || images.length)) void send();
+    }
+  };
 
   const menuActions = (m: UiMessage): SheetAction[] => {
     const acts: SheetAction[] = [{ label: 'Copiar', icon: 'copy-outline', onPress: () => Clipboard.setStringAsync(m.content) }];
@@ -351,7 +366,7 @@ export default function ChatScreen() {
       <View style={[styles.msgRow, mine && { justifyContent: 'flex-end' }]}>
         {!mine ? <Avatar path={speaker?.avatar ?? meta.character?.avatar_path} name={speaker?.name ?? title} size={32} /> : null}
         <View style={{ maxWidth: '82%', alignItems: mine ? 'flex-end' : 'flex-start' }}>
-          {!mine && isGroup && speaker ? <Text style={styles.speaker}>{speaker.name}</Text> : null}
+          {!mine ? <Text style={styles.speaker}>{speaker?.name ?? title}</Text> : null}
           {privateName ? (
             <Row gap={4} style={{ marginBottom: 2 }}>
               <Ionicons name="lock-closed" size={11} color={colors.signal} />
@@ -409,8 +424,17 @@ export default function ChatScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        {backdrop ? (
+          <Image source={{ uri: backdrop }} style={[StyleSheet.absoluteFill, { opacity: 0.38 }]} contentFit="cover" blurRadius={14} />
+        ) : (
+          <LinearGradient colors={paletteFor(title)} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { opacity: 0.55 }]} />
+        )}
+        <LinearGradient colors={['rgba(10,10,15,0.35)', 'rgba(10,10,15,0.78)', 'rgba(10,10,15,0.96)']} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFill} />
+      </View>
       <Stack.Screen
         options={{
+          headerStyle: { backgroundColor: 'rgba(10,10,15,0.72)' },
           headerTitle: () => (
             <Pressable onPress={() => meta.character && router.push(`/character/${meta.character.id}`)}>
               <Row>
@@ -434,6 +458,27 @@ export default function ChatScreen() {
           ),
         }}
       />
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+      {wide ? (
+        <View style={styles.side}>
+          <View style={styles.sideArt}>
+            <CoverArt c={{ name: title, avatar_path: meta.character?.avatar_path ?? null }} initialSize={110} />
+            <LinearGradient colors={['transparent', 'rgba(10,10,15,0.9)']} locations={[0.55, 1]} style={StyleSheet.absoluteFill} />
+            <View style={{ position: 'absolute', left: space.md, right: space.md, bottom: space.md }}>
+              <Text style={[type.h1, { color: '#fff' }]} numberOfLines={2}>
+                {title}
+              </Text>
+              {persona ? <Text style={[type.small, { color: colors.textSoft }]}>Você está como {persona.name}</Text> : null}
+            </View>
+          </View>
+          <View style={{ gap: space.sm, marginTop: space.md }}>
+            {meta.character ? <Button title="Ver perfil" variant="secondary" small icon="person-outline" onPress={() => router.push(`/character/${meta.character!.id}`)} /> : null}
+            <Button title="Memórias" variant="secondary" small icon="bulb-outline" onPress={() => router.push(`/memories/${id}`)} />
+            <Button title="Ajustes da conversa" variant="ghost" small icon="options-outline" onPress={() => setSettings(true)} />
+          </View>
+          <Text style={[type.small, { marginTop: space.md, color: colors.faint }]}>Enter envia · Shift+Enter pula linha</Text>
+        </View>
+      ) : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.top + 44}>
         <FlatList
           ref={listRef}
@@ -492,8 +537,7 @@ export default function ChatScreen() {
               multiline
               maxLength={8000}
               style={styles.input}
-              onSubmitEditing={Platform.OS === 'web' ? send : undefined}
-              blurOnSubmit={false}
+              onKeyPress={onKeyPress}
             />
             {busy ? (
               <Pressable onPress={stop} style={[styles.sendBtn, { backgroundColor: colors.overlay }]} accessibilityLabel="Parar">
@@ -507,6 +551,7 @@ export default function ChatScreen() {
           </Row>
         </View>
       </KeyboardAvoidingView>
+      </View>
 
       <ActionSheet visible={Boolean(menuFor)} onClose={() => setMenuFor(null)} actions={menuFor ? menuActions(menuFor) : []} />
 
@@ -609,14 +654,16 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm, marginBottom: space.md },
-  speaker: { color: colors.signal, fontSize: 12, fontWeight: '700', marginBottom: 3, marginLeft: 4 },
+  msgRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, marginBottom: space.md },
+  speaker: { color: colors.signal, fontSize: 12, fontWeight: '800', marginBottom: 3, marginLeft: 4 },
   bubble: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
-  userBubble: { backgroundColor: colors.userBubble, borderBottomRightRadius: 6 },
-  botBubble: { backgroundColor: colors.botBubble, borderBottomLeftRadius: 6, borderWidth: 1, borderColor: colors.borderSoft },
+  userBubble: { backgroundColor: colors.userBubble, borderTopRightRadius: 6 },
+  botBubble: { backgroundColor: 'rgba(22,22,32,0.86)', borderTopLeftRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   chatImage: { width: 180, height: 180, borderRadius: 12 },
-  composer: { paddingHorizontal: space.sm, paddingTop: space.sm, borderTopWidth: 1, borderTopColor: colors.borderSoft, backgroundColor: colors.bg },
-  input: { flex: 1, minHeight: 44, maxHeight: 140, backgroundColor: colors.surface, borderRadius: 22, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: space.lg, paddingTop: 11, paddingBottom: 11, fontSize: 15 },
+  composer: { paddingHorizontal: space.sm, paddingTop: space.sm, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(10,10,15,0.9)', width: '100%', maxWidth: 860, alignSelf: 'center' },
+  input: { flex: 1, minHeight: 44, maxHeight: 140, backgroundColor: 'rgba(26,26,37,0.95)', borderRadius: 22, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: space.lg, paddingTop: 11, paddingBottom: 11, fontSize: 15 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  side: { width: 300, padding: space.lg, borderRightWidth: 1, borderRightColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(10,10,15,0.55)' },
+  sideArt: { width: '100%', aspectRatio: 0.75, borderRadius: radius.xl, overflow: 'hidden' },
   removeImg: { position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: 10, backgroundColor: colors.danger, alignItems: 'center', justifyContent: 'center' },
 });
