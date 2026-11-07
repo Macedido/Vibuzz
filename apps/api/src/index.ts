@@ -1,31 +1,34 @@
+import { serve } from '@hono/node-server';
 import { buildApp } from './app';
 import { loadEnv } from './config';
+import { createLogger } from './lib/log';
 import { createServices } from './services';
 
+/** Node entry (local dev, Docker, Render...). Supabase Edge uses src/edge.ts. */
 async function main() {
-  const env = loadEnv();
-  // Temporary logger for service construction; the app creates its own.
-  const bootstrap = await import('fastify').then((m) => m.default({ logger: { level: env.LOG_LEVEL } }));
-  const services = createServices(env, bootstrap.log);
-  const app = await buildApp(services);
+  const env = loadEnv(process.env);
+  const log = createLogger(env.LOG_LEVEL);
+  const services = createServices(env, log);
+  const app = buildApp(services, { log });
 
   const status = services.ai.status();
-  if (status.missing.length) app.log.warn({ missing: status.missing }, 'AI integrations not fully configured');
+  if (status.missing.length) log.warn({ missing: status.missing }, 'AI integrations not fully configured');
 
-  const workerEnabled = env.WORKER_ENABLED ?? true;
-  if (workerEnabled) services.worker.start();
+  if (env.WORKER_ENABLED ?? true) services.worker.start();
+
+  const server = serve({ fetch: app.fetch, port: env.PORT, hostname: env.HOST }, (info) => {
+    log.info({ port: info.port }, 'vibuzz api listening');
+  });
 
   const shutdown = async (signal: string) => {
-    app.log.info({ signal }, 'shutting down');
+    log.info({ signal }, 'shutting down');
     await services.worker.stop();
     await services.flushUsage();
-    await app.close();
+    server.close();
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
-
-  await app.listen({ port: env.PORT, host: env.HOST });
 }
 
 main().catch((err) => {

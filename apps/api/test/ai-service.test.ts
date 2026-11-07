@@ -62,11 +62,16 @@ describe('AiService', () => {
     await expect(ai.stream('advanced', req, meta, () => {})).rejects.toBeInstanceOf(ProviderError);
   });
 
-  it('does not fall back on non-retryable errors', async () => {
+  it('falls back on any error before the first token (e.g. a model rejecting the request)', async () => {
     const second = vi.fn(() => ok('x'));
     const ai = new AiService(new Map([['a', fake('a', () => fail(false))], ['b', fake('b', second)]]), { advanced: [{ provider: 'a', model: 'm' }, { provider: 'b', model: 'm' }] }, () => {});
-    await expect(ai.complete('advanced', req, meta)).rejects.toThrow();
-    expect(second).not.toHaveBeenCalled();
+    expect((await ai.complete('advanced', req, meta)).text).toBe('x');
+    expect(second).toHaveBeenCalled();
+  });
+
+  it('surfaces the last error when every model fails', async () => {
+    const ai = new AiService(new Map([['a', fake('a', () => fail(true))], ['b', fake('b', () => fail(false))]]), { advanced: [{ provider: 'a', model: 'm' }, { provider: 'b', model: 'm' }] }, () => {});
+    await expect(ai.complete('advanced', req, meta)).rejects.toBeInstanceOf(ProviderError);
   });
 
   it('reuses neighbouring tiers and reports missing config', () => {

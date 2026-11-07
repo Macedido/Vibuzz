@@ -8,13 +8,14 @@ Tudo o que precisa ser configurado fora do código. Nenhuma credencial vem no re
 |---|---|---|
 | Node.js 22+ e npm | rodar tudo | sim |
 | Conta [Supabase](https://supabase.com) | banco Postgres + pgvector, login, arquivos | sim |
-| Chave [Anthropic](https://console.anthropic.com) | chat, criação com IA, visão, memória | sim (ou outro provedor de chat) |
-| Chave [OpenAI](https://platform.openai.com) | embeddings (memória semântica) e moderação | recomendado |
+| Chave [Gemini](https://aistudio.google.com/apikey) | IA melhor e com mais volume, **grátis** | recomendado |
+| Chave [Anthropic](https://console.anthropic.com) | melhor qualidade de chat/criação | opcional (pago) |
+| Chave [OpenAI](https://platform.openai.com) | moderação dedicada | opcional |
 | Conta [Expo](https://expo.dev) + `eas-cli` | builds Android/iOS | para as lojas |
 | Hospedagem da API (Render, Railway, Fly…) | servidor da IA | para produção |
 | Google Play Console / Apple Developer | publicar | para as lojas |
 
-Sem OpenAI o app funciona: a memória usa só busca por palavras-chave e a moderação usa o modelo de chat. Qualquer API compatível com OpenAI (OpenRouter, Groq, Together, Gemini) também serve — veja `COMPAT_*` em `apps/api/.env.example`.
+Sem nenhuma chave o app já funciona com IA gratuita (veja a seção 3). Qualquer API compatível com OpenAI (OpenRouter, Groq, Together) também serve — veja `COMPAT_*` em `apps/api/.env.example`.
 
 ## 1. Instalar
 
@@ -39,7 +40,28 @@ npm run check        # typecheck + testes + migrations (não precisa de chaves)
 5. **Produção:** configure um SMTP próprio (Resend, Postmark, SES) em *Authentication → SMTP* — o e-mail padrão do Supabase tem limite baixo de envios.
 6. Copie de *Project Settings → API*: `Project URL`, a chave **anon/publishable** (vai no app) e a **service_role/secret** (só na API).
 
-## 3. API (`apps/api`)
+## 3. API no Supabase (grátis, sem servidor) — recomendado para começar
+
+A API roda como **Edge Function** do próprio Supabase. Não precisa de Render, cartão nem chave de serviço (o Supabase injeta).
+
+- **IA sem chave:** por padrão usa modelos gratuitos sem conta (OVHcloud AI Endpoints em modo anônimo — Llama 3.3 70B, Mistral Small, gpt-oss, Qwen — e Pollinations como reserva). Funciona na hora, mas é mais lento e tem limite por IP (≈2 pedidos/min por modelo; o Vibuzz alterna entre vários).
+- **Memória:** embeddings `gte-small` rodando dentro do Supabase, grátis.
+- **Tarefas de fundo:** `pg_cron` chama `/v1/internal/tick` a cada minuto (migration 11).
+
+Publicar/atualizar:
+```bash
+npm run build:edge                      # gera supabase/functions/vibuzz-api/bundle.js
+npx supabase functions deploy vibuzz-api --no-verify-jwt --project-ref <ref>
+```
+Depois, uma vez:
+```sql
+update private.settings set value = 'https://<ref>.supabase.co/functions/v1/vibuzz-api' where key = 'api_url';
+```
+URL da API para o app: `https://<ref>.supabase.co/functions/v1/vibuzz-api`.
+
+**Melhorar a IA (grátis):** crie uma chave em [aistudio.google.com/apikey](https://aistudio.google.com/apikey) e adicione `GEMINI_API_KEY` em *Supabase → Edge Functions → Secrets*. Não precisa reimplantar. A IA gratuita sem chave continua como reserva.
+
+## 3b. API em servidor Node (`apps/api`)
 
 ```bash
 cp apps/api/.env.example apps/api/.env
@@ -62,7 +84,6 @@ npm run eval -w @vibuzz/api     # 9 cenários reais: personalidade, memória, ce
 - **Qualquer Docker:** `docker build -f apps/api/Dockerfile -t vibuzz-api .` na raiz.
 - Exponha HTTPS. Streaming usa Server-Sent Events: se houver proxy (Nginx), desligue buffering (`proxy_buffering off`).
 - Em produção defina `CORS_ORIGINS` com o domínio da versão web.
-- Opcional: `REDIS_URL` para limites de requisição compartilhados entre instâncias.
 
 ## 4. App (`apps/mobile`)
 

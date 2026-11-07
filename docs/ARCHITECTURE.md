@@ -8,7 +8,7 @@
  └──────────────┘                                    │  └─────────────▲─────────────┘
                                                      ▼                │ service role
                                           ┌─────────────────────┐     │
-                                          │  Vibuzz API (Fastify)│─────┘
+                                          │  Vibuzz API (Hono)   │─────┘
                                           │  Intelligence Engine │──▶ Anthropic / OpenAI / compatível
                                           │  Memory · Vision     │
                                           │  Moderation · Worker │
@@ -21,8 +21,9 @@
 
 | Módulo | Pasta | Responsabilidade |
 |---|---|---|
+| HTTP | `app.ts`, `routes.ts` | Hono (Request/Response padrão): roda em Node (`index.ts`) e no Supabase Edge (`edge.ts`); CORS, limite por minuto, erros |
 | Authentication | `app.ts` | Valida o JWT do Supabase em cada requisição (cache de 60 s) |
-| AI providers | `modules/ai` | Camada independente: Anthropic, OpenAI e qualquer API compatível; cadeias de fallback por nível; custo, latência e erros em `usage_records`; remove parâmetros que um modelo não aceita |
+| AI providers | `modules/ai` | Camada independente: Anthropic, Gemini, OpenAI, OVHcloud/Pollinations (grátis, sem chave) e qualquer API compatível; cadeias de fallback por nível (qualquer falha antes do 1º token passa ao próximo modelo); embeddings `gte-small` no Supabase; custo, latência e erros em `usage_records` |
 | Intelligence Engine | `modules/intelligence` | Monta o contexto de cada resposta, escolhe o nível, faz streaming, orquestra grupos, rastreia a cena |
 | Memory Engine | `modules/memory` | Consolidação, deduplicação, recuperação híbrida, resumos, invalidação |
 | Image Understanding | `modules/vision` | Análise estruturada: tipo de imagem, sujeitos separados, só traços visíveis |
@@ -30,7 +31,7 @@
 | Characters / Groups | `modules/characters` | Criação, versões, tags, imagens, integrantes, embeddings para recomendação |
 | Conversations / Messages | `modules/conversations` | Enviar, regenerar, continuar, editar, ramificar, apagar, limites diários |
 | Moderation | `modules/moderation` | Texto e imagem; rigor depende de onde o conteúdo aparece |
-| Jobs | `modules/jobs` | Fila no Postgres (`claim_jobs` com `SKIP LOCKED`), retentativas com backoff |
+| Jobs | `modules/jobs` | Fila no Postgres (`claim_jobs` com `SKIP LOCKED`), retentativas com backoff; loop no Node, `drain()` + `pg_cron` no Edge |
 
 Discovery, Social, Profiles, Personas, Notifications e Relationships são lidos/escritos pelo app com RLS e funções SQL (`discover_characters`, `recommend_characters`, `creator_stats`, gatilhos de contadores e notificações).
 
@@ -74,7 +75,7 @@ Depois de cada turno, um modelo rápido atualiza o estado narrativo (local, pres
 - Fichas completas (com instruções do criador) só são legíveis pelo criador; o público vê o card.
 - Idade: 13+ no cadastro (verificado no gatilho do banco); 18+ exige maioridade **e** opção explícita; personagens menores nunca podem ter romance/18+; regras de idade entram no prompt.
 - Moderação por contexto (`decide()`): chat privado bloqueia só limites rígidos e detecta crise; fichas públicas, perfis e comentários são mais rígidos; imagens no bucket público são sempre checadas.
-- Limites: por minuto (Fastify rate limit, Redis opcional) e diários (mensagens e custo).
+- Limites: por minuto (em memória, por instância) e diários (mensagens e custo, no banco).
 - Exclusão de conta apaga arquivos e, por cascata, todos os dados.
 
 ## Personagens com vida própria (futuro)

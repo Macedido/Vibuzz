@@ -20,9 +20,22 @@ const envSchema = z.object({
   ANTHROPIC_BASE_URL: z.string().url().default('https://api.anthropic.com'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  /** Any OpenAI-compatible endpoint (OpenRouter, Groq, Together, Gemini compat, local vLLM...). */
+  /** Any OpenAI-compatible endpoint (OpenRouter, Groq, Together, local vLLM...). */
   COMPAT_API_KEY: z.string().optional(),
   COMPAT_BASE_URL: z.string().url().optional(),
+  /** Google AI Studio key (free tier available). */
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com/v1beta/openai'),
+  /**
+   * Keyless free models (OVHcloud AI Endpoints anonymous tier + Pollinations) used
+   * when no paid/keyed provider is configured, and as last-resort fallback.
+   */
+  FREE_AI: bool,
+  OVH_BASE_URL: z.string().url().default('https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'),
+  OVH_API_KEY: z.string().optional(),
+  POLLINATIONS_BASE_URL: z.string().url().default('https://text.pollinations.ai'),
+  /** Run the classifier on every private chat message (default: only with a keyed provider). */
+  MODERATE_PRIVATE_CHAT: bool,
 
   /** Comma-separated fallback chains: "provider:model,provider:model". */
   MODEL_FAST: z.string().optional(),
@@ -37,7 +50,6 @@ const envSchema = z.object({
   DAILY_MESSAGE_LIMIT: z.coerce.number().default(400),
   DAILY_COST_LIMIT_USD: z.coerce.number().default(1.5),
   RATE_LIMIT_PER_MINUTE: z.coerce.number().default(60),
-  REDIS_URL: z.string().optional(),
 
   WORKER_ENABLED: bool,
   WORKER_CONCURRENCY: z.coerce.number().default(3),
@@ -46,7 +58,7 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
-export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
+export function loadEnv(source: Record<string, string | undefined>): Env {
   const parsed = envSchema.safeParse(source);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');

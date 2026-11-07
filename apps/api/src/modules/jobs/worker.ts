@@ -1,5 +1,5 @@
-import type { FastifyBaseLogger } from 'fastify';
 import type { Db } from '../../lib/db';
+import type { Logger } from '../../lib/log';
 
 export interface Job {
   id: number;
@@ -17,20 +17,21 @@ export function backoffSeconds(attempt: number): number {
 }
 
 /**
- * Postgres-backed job worker (claim_jobs uses FOR UPDATE SKIP LOCKED, so several
- * API instances can run workers safely). Runs memory consolidation, summaries,
- * scene tracking, rebuilds, embeddings and maintenance asynchronously.
+ * Postgres-backed job worker (claim_jobs uses FOR UPDATE SKIP LOCKED, so many
+ * instances can run safely). On a server it loops forever; on serverless
+ * runtimes `drain()` is called after requests and by pg_cron.
  */
 export class JobWorker {
   private running = false;
-  private timer: NodeJS.Timeout | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private lastMaintenance = 0;
-  private readonly id = `worker-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  private draining: Promise<number> | null = null;
+  private readonly id = `worker-${Math.random().toString(36).slice(2, 10)}`;
 
   constructor(
     private db: Db,
     private handlers: Record<string, JobHandler>,
-    private log: FastifyBaseLogger,
+    private log: Logger,
     private concurrency = 3,
     private maintenance?: () => Promise<void>,
   ) {}
@@ -52,10 +53,7 @@ export class JobWorker {
       let claimed = 0;
       try {
         claimed = await this.tick();
-        if (this.maintenance && Date.now() - this.lastMaintenance > 3600_000) {
-          this.lastMaintenance = Date.now();
-          await this.maintenance().catch((e) => this.log.error({ err: e }, 'maintenance failed'));
-        }
+        await this.maybeMaintain();
       } catch (e) {
         this.log.error({ err: e }, 'worker tick failed');
       }
@@ -63,6 +61,35 @@ export class JobWorker {
         this.timer = setTimeout(r, claimed ? 100 : 1500);
       });
     }
+  }
+
+  /** Runs maintenance at most once an hour per instance. */
+  async maybeMaintain() {
+    if (!this.maintenance || Date.now() - this.lastMaintenance < 3600_000) return;
+    this.lastMaintenance = Date.now();
+    await this.maintenance().catch((e) => this.log.error({ err: e }, 'maintenance failed'));
+  }
+
+  /** Processes ready jobs until the queue is empty or the time budget runs out. */
+  drain(budgetMs: number): Promise<number> {
+    if (this.draining) return this.draining;
+    const deadline = Date.now() + budgetMs;
+    this.draining = (async () => {
+      let total = 0;
+      try {
+        while (Date.now() < deadline) {
+          const n = await this.tick();
+          total += n;
+          if (!n) break;
+        }
+      } catch (e) {
+        this.log.error({ err: e }, 'drain failed');
+      } finally {
+        this.draining = null;
+      }
+      return total;
+    })();
+    return this.draining;
   }
 
   async tick(): Promise<number> {

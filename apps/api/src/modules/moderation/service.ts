@@ -62,6 +62,25 @@ export function normalizeProviderCategories(cats: string[]): ModCategory[] {
   return [...out];
 }
 
+/** Conservative keyword screen: the hard limit (sexual content with minors) and crisis signals. */
+export function localScreen(text: string): ModCategory[] {
+  const t = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const minor = /\b(crianca|menin[oa]|novinh[oa]|pre-?adolescente|\d{1,2} ?anos|child|kid|underage|loli|shota)\b/;
+  const sexual = /\b(sexo|transar|nu[ad]?|pelad[oa]|sexual|porn|nude|naked|sex)\b/;
+  const age = t.match(/\b(\d{1,2}) ?anos\b/);
+  const isMinorAge = age ? Number(age[1]) < 18 : false;
+  const out: ModCategory[] = [];
+  if (sexual.test(t) && (isMinorAge || (minor.test(t) && !/\d{1,2} ?anos/.test(t)))) out.push('sexual_minors');
+  // Crisis signals are not blocked; they make the character respond with care.
+  if (/(quero morrer|me matar|suicid|acabar com (tudo|a minha vida|minha vida)|nao aguento mais viver|tirar minha vida|kill myself|end my life)/.test(t)) {
+    out.push('self_harm_intent');
+  }
+  return out;
+}
+
 export function decide(categories: ModCategory[], ctx: ModContext): Verdict {
   const blocking = categories.filter((c) => BLOCKING[ctx].includes(c));
   return {
@@ -93,6 +112,7 @@ export class ModerationService {
   constructor(
     private ai: AiService,
     private db: Db,
+    private opts: { moderatePrivateChat: boolean } = { moderatePrivateChat: true },
   ) {}
 
   /**
@@ -100,6 +120,9 @@ export class ModerationService {
    * platform rules); anything public fails closed.
    */
   async checkText(text: string, ctx: ModContext, meta: UsageMeta & { targetType?: string; targetId?: string }): Promise<Verdict> {
+    // With rate-limited free models, private chat relies on the platform rules in the prompt
+    // plus a cheap local screen for the one hard limit; public content is always classified.
+    if (ctx === 'chat' && !this.opts.moderatePrivateChat) return decide(localScreen(text), ctx);
     try {
       return await this.classifyText(text, ctx, meta);
     } catch (e) {
@@ -135,7 +158,17 @@ export class ModerationService {
     return verdict;
   }
 
+  /** Images sent in private chats fail open if the classifier is down; public images fail closed. */
   async checkImage(img: { base64: string; mimeType: string }, ctx: ModContext, meta: UsageMeta & { targetType?: string; targetId?: string }): Promise<Verdict> {
+    try {
+      return await this.classifyImage(img, ctx, meta);
+    } catch (e) {
+      if (ctx === 'image_chat') return decide([], ctx);
+      throw e;
+    }
+  }
+
+  private async classifyImage(img: { base64: string; mimeType: string }, ctx: ModContext, meta: UsageMeta & { targetType?: string; targetId?: string }): Promise<Verdict> {
     if (!this.ai.moderationEnabled) return decide([], ctx);
     const provider = await this.ai.providerModeration({ imageBase64: { data: img.base64, mimeType: img.mimeType } }).catch(() => null);
     let categories: ModCategory[];

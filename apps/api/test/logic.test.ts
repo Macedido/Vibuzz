@@ -121,3 +121,47 @@ describe('vision subject picking', () => {
     expect(pickSubject(analysis, 'pessoa 1')?.observable.hair).toBe('ruivo');
   });
 });
+
+describe('free AI support', async () => {
+  const { ThinkFilter } = await import('../src/modules/ai/providers/openai');
+  const { localScreen } = await import('../src/modules/moderation/service');
+  const { bytesToBase64 } = await import('../src/lib/storage');
+  const { AiService } = await import('../src/modules/ai/service');
+  const { loadEnv } = await import('../src/config');
+
+  it('removes <think> blocks even when split across chunks', () => {
+    const f = new ThinkFilter();
+    expect(['Olá <thi', 'nk>pensando...</th', 'ink> mundo', '!'].map((c) => f.push(c)).join('')).toBe('Olá  mundo!');
+    const g = new ThinkFilter();
+    expect(g.push('a < b')).toBe('a < b');
+  });
+
+  it('screens minors + sexual content and crisis signals locally', () => {
+    expect(localScreen('ela tem 15 anos e quer sexo')).toEqual(['sexual_minors']);
+    expect(localScreen('ela tem 25 anos e quer sexo')).toEqual([]);
+    expect(localScreen('vamos explorar a caverna')).toEqual([]);
+    expect(localScreen('sinceramente quero morrer')).toEqual(['self_harm_intent']);
+  });
+
+  it('encodes base64 without Buffer', () => {
+    expect(bytesToBase64(new TextEncoder().encode('Vibuzz ✓'))).toBe(Buffer.from('Vibuzz ✓').toString('base64'));
+  });
+
+  it('uses keyless free models when no key is set, Gemini first when it is', () => {
+    const base = { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'x'.repeat(32) };
+    const free = AiService.fromEnv(loadEnv(base), () => {});
+    expect(free.chains.advanced[0]).toEqual({ provider: 'ovh', model: 'Meta-Llama-3_3-70B-Instruct' });
+    expect(free.chains.advanced.at(-1)?.provider).toBe('pollinations');
+    expect(free.hasPaidChat).toBe(false);
+    expect(free.supportsInlineImages).toBe(false);
+    expect(free.status().missing.join(' ')).toMatch(/GEMINI_API_KEY/);
+
+    const gem = AiService.fromEnv(loadEnv({ ...base, GEMINI_API_KEY: 'k' }), () => {});
+    expect(gem.chains.advanced[0]).toEqual({ provider: 'gemini', model: 'gemini-flash-latest' });
+    expect(gem.chains.advanced[1].provider).toBe('ovh');
+    expect(gem.hasPaidChat).toBe(true);
+
+    const off = AiService.fromEnv(loadEnv({ ...base, FREE_AI: 'false' }), () => {});
+    expect(off.status().chat).toBe(false);
+  });
+});

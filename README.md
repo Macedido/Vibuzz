@@ -15,6 +15,7 @@ O Vibuzz é uma plataforma onde qualquer pessoa cria personagens, conversa com e
 |---|---|
 | **Criação** | Ficha estruturada completa (20 campos), criação manual, **com IA** (ideia + imagens), análise de imagem que distingue 1 pessoa / várias / cenário / sem referência / ambígua e pergunta qual pessoa usar, regenerar campo a campo, **versões** com prévia de mudanças e restauração, grupos de 2–8 integrantes |
 | **Chat** | Streaming, imagens (com visão), regenerar, continuar, editar (nova ramificação ou substituir), apagar (do histórico ou definitivo), **ramificações** navegáveis ‹ 1/3 ›, fixar, favoritar, arquivar, pesquisa no histórico, troca de persona, criatividade |
+| **IA grátis** | Funciona sem chave nenhuma (modelos gratuitos OVHcloud + Pollinations, memória com embeddings do Supabase); Gemini grátis ou Anthropic/OpenAI quando quiser mais qualidade |
 | **Motor de IA** | Vibuzz Intelligence Engine: identidade + persona + memórias + cena + relações + resumos + histórico, com prompt cacheável, proteção contra prompt injection, 3 níveis (rápido/avançado/especializado), fallback entre provedores, controle de custo e latência |
 | **Memória** | 7 categorias, consolidação assíncrona (extrai → deduplica → atualiza → salva com mensagens de origem), busca híbrida (semântica pgvector + palavras-chave + importância + recência), resumos incrementais, memória **por ramificação**, invalidação/reconstrução ao apagar mensagens, tela para ver/corrigir/apagar |
 | **Grupos** | Orquestrador decide quem fala, quem fica quieto, reações e discordâncias; memória individual + coletiva; **mensagens privadas** para um integrante que os outros não sabem |
@@ -26,7 +27,8 @@ O Vibuzz é uma plataforma onde qualquer pessoa cria personagens, conversa com e
 
 ```
 apps/mobile      App Expo (React Native + TypeScript, Expo Router) — Android, iOS, web
-apps/api         API Node/TypeScript (Fastify): motor de IA, memória, visão, moderação, fila
+apps/api         API TypeScript (Hono) — Node ou Supabase Edge Functions: motor de IA, memória, visão, moderação, fila
+supabase/functions/vibuzz-api   API empacotada para o Supabase (npm run build:edge)
 packages/shared  Esquemas zod e tipos compartilhados
 supabase/        Migrations SQL (schema, RLS, funções, storage) — aplicadas no projeto Supabase "Vibuzz"
 scripts/         Validação das migrations (PGlite + pgvector) e geração de ícones

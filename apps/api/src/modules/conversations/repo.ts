@@ -7,7 +7,11 @@ const CHARACTER_COLUMNS =
 
 /** Data access shared by the engine, memory jobs and routes (service role). */
 export class Repo {
-  constructor(readonly db: Db) {}
+  /** immediateJobs: serverless runtimes run jobs right after the request instead of batching with delays. */
+  constructor(
+    readonly db: Db,
+    private opts: { immediateJobs?: boolean } = {},
+  ) {}
 
   async user(id: string): Promise<UserRow & { isAdult: boolean }> {
     const row = must(await this.db.from('users').select('id, birthdate, allow_mature, role, status').eq('id', id).maybeSingle(), 'user') as UserRow | null;
@@ -86,6 +90,7 @@ export class Repo {
   }
 
   async enqueue(type: string, payload: Record<string, unknown>, dedupeKey?: string, delaySeconds = 0) {
-    await this.db.rpc('enqueue_job', { p_type: type, p_payload: payload, p_dedupe_key: dedupeKey ?? null, p_delay_seconds: delaySeconds });
+    const delay = this.opts.immediateJobs ? 0 : delaySeconds;
+    await this.db.rpc('enqueue_job', { p_type: type, p_payload: payload, p_dedupe_key: dedupeKey ?? null, p_delay_seconds: delay });
   }
 }

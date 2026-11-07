@@ -137,8 +137,13 @@ export class ConversationService {
       if (!img) throw badRequest('Imagem muito grande (máx. 4 MB).');
       const v = await this.moderation.checkImage(img, 'image_chat', { userId, conversationId, kind: 'moderation_image', targetType: 'message' });
       if (!v.allowed) throw blocked(`Imagem não permitida: ${v.reason}`);
-      const a = await this.vision.analyze(img, { userId, conversationId, kind: 'vision' }, 'chat');
-      analyses.push({ path, summary: analysisToNote(a), kind: a.kind });
+      try {
+        const a = await this.vision.analyze(img, { userId, conversationId, kind: 'vision' }, 'chat');
+        analyses.push({ path, summary: analysisToNote(a), kind: a.kind });
+      } catch {
+        // Vision unavailable (e.g. free models busy): keep the message, note the image.
+        analyses.push({ path, summary: 'O usuário enviou uma imagem que não pôde ser descrita automaticamente; pergunte o que ela mostra se for relevante.', kind: 'unknown' });
+      }
     }
 
     const parentId = input.parentId ?? conv.active_leaf_id;

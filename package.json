@@ -2,7 +2,7 @@
   "name": "vibuzz",
   "version": "1.0.0",
   "private": true,
-  "description": "Vibuzz — personagens com IA, memória permanente e comunidade. Create. Connect. Remember.",
+  "description": "Vibuzz \u2014 personagens com IA, mem\u00f3ria permanente e comunidade. Create. Connect. Remember.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -14,7 +14,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:db": "node scripts/validate-migrations.mjs",
-    "check": "npm run typecheck && npm run test && npm run test:db"
+    "check": "npm run typecheck && npm run test && npm run test:db",
+    "build:edge": "npm run build:edge -w @vibuzz/api"
   },
   "engines": {
     "node": ">=20"

@@ -1,10 +1,10 @@
 # Status do projeto
 
-Atualizado em 06/11/2026 · versão 1.0.0
+Atualizado em 06/11/2026 · versão 1.1.0
 
 ## Funcionalidades concluídas
 
-**Fundação** — monorepo (npm workspaces), app Expo SDK 58 com Expo Router e TypeScript, identidade visual própria (tema escuro, verde-ácido + lilás, ícones gerados), navegação com 5 abas, API Fastify modular, Supabase com 10 migrations, login/cadastro com idade mínima, recuperação de senha, perfis.
+**Fundação** — monorepo (npm workspaces), app Expo SDK 58 com Expo Router e TypeScript, identidade visual própria (tema escuro, verde-ácido + lilás, ícones gerados), navegação com 5 abas, API modular (Hono), Supabase com 10 migrations, login/cadastro com idade mínima, recuperação de senha, perfis.
 
 **Personagens** — ficha estruturada (nome, gênero, idade, frase, aparência, biografia, personalidade, passado, fala, gostos, desgostos, medos, objetivos, hábitos, comportamentos, relações, universo, cenário, primeira mensagem, instruções); nada obrigatório além do nome; avatar e galeria; categorias e tags; público / por link / privado; classificação Livre / 13+ / 18+; versões imutáveis com prévia das mudanças e restauração; página do personagem; apagar (ou despublicar se outros conversam com ele).
 
@@ -22,16 +22,19 @@ Atualizado em 06/11/2026 · versão 1.0.0
 
 **Comunidade** — início com recomendações, em alta, populares, novos, seguidos, grupos e “continue suas conversas”; descobrir com busca por nome / descrição / @criador / #tag, categorias, 5 ordenações e filtro de grupos; curtir, favoritar, avaliar 1–5, comentar, seguir, compartilhar link, perfis públicos, notificações.
 
+**IA grátis e API serverless (1.1)** — API portátil (Hono) que roda em Node e no Supabase Edge Functions; modelos gratuitos sem chave (OVHcloud anônimo com 5 modelos em rodízio + Pollinations), Gemini grátis opcional, embeddings `gte-small` dentro do Supabase, worker por `pg_cron`, filtro de `<think>`, timeouts com troca automática de modelo, triagem local de segurança (menores e sinais de crise) quando a moderação por IA está desligada no chat privado.
+
 **Segurança e operação** — RLS completa, moderação de texto e imagem por contexto, regras de idade, denúncias, bloqueio, limites por minuto e por dia, exclusão de conta (LGPD), termos e privacidade no app, fila de jobs com retentativa, limpeza periódica, Docker, Render, CI.
 
 ## Testes realizados
 
 | Suíte | Comando | Resultado |
 |---|---|---|
-| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 70/70 |
+| Banco: migrations + RLS + funções em Postgres embutido (PGlite + pgvector) | `npm run test:db` | 77/77 |
 | Banco real no Supabase (projeto `Vibuzz`, sa-east-1): cadastro, idade mínima, RLS, busca, curtidas — em transação desfeita | SQL | ok |
 | Supabase Security Advisor | painel | só avisos esperados (`is_username_available`, `conversation_path`, tabelas só do servidor) |
-| API: provedores, fallback, prompts, memória, moderação, HTTP/SSE | `npm test` | 46/46 |
+| API: provedores, fallback, prompts, memória, moderação, HTTP/SSE, IA grátis, edge | `npm test` | 56/56 |
+| Pacote edge rodando em Deno 2 (health, status, CORS, auth, tick) | `deno run` | ok |
 | Typecheck shared + API + app | `npm run typecheck` | ok |
 | Build da API e export web do app | `npm run build:api`, `build:web` | ok |
 | Revisão visual das telas principais (web, dados simulados) | — | ok |
@@ -41,16 +44,19 @@ Atualizado em 06/11/2026 · versão 1.0.0
 
 - **Teste ponta a ponta com IA real** ainda não foi feito (faltam chaves de IA). O banco real já foi testado. Depois do setup: crie conta, crie um personagem com IA, converse, edite, apague, veja memórias, rode `npm run eval`.
 - **Builds nativos** (EAS) não foram gerados aqui: exigem conta Expo. O app compila e roda na web; Android/iOS usam o mesmo código.
+- **IA gratuita sem chave** é limitada (≈2 pedidos/min por modelo e por IP, qualidade média, às vezes lenta). Serve para testar e para poucos usuários; para lançar, adicione `GEMINI_API_KEY` (grátis) ou uma chave paga.
+- No modo grátis, mensagens privadas não passam pelo classificador de IA (para não gastar o limite): valem as regras no prompt + triagem local de menores e de crise. Conteúdo público (fichas, perfis, comentários, imagens públicas) continua sempre moderado.
 - **Push notifications:** só notificações dentro do app. Para push: `expo-notifications` + tabela de tokens.
 - **Painel de moderação:** denúncias são revisadas pelo painel do Supabase (SQL em `SETUP.md`). Um painel web de admin é o próximo passo natural.
 - **Personagens com vida própria:** arquitetura pronta (preferência, fila agendada, notificações); a geração dos acontecimentos ainda não foi implementada.
 - **Billing:** fora do escopo (módulo futuro). `usage_records` já guarda custo por usuário.
 - **Recomendações** usam gosto por categoria/tag, embeddings e seguidos; sem modelo treinado.
-- Limites de requisição são por instância, a menos que `REDIS_URL` esteja definido.
+- Limite por minuto é por instância (memória); o limite diário fica no banco.
 
 ## Decisões técnicas
 
-- **Postgres como fila** (em vez de Redis/BullMQ): uma dependência a menos, transacional com os dados, `SKIP LOCKED` para vários workers. Redis fica opcional (rate limit).
+- **Postgres como fila** (em vez de Redis/BullMQ): uma dependência a menos, transacional com os dados, `SKIP LOCKED` para vários workers. Em serverless, `pg_cron` dispara o worker.
+- **Hono** no lugar de Fastify: o mesmo app roda em Node e em Deno (Supabase Edge).
 - **Mensagens em árvore** (`parent_id`) + folha ativa na conversa: ramificações, edições e regenerações sem duplicar históricos.
 - **Memória ancorada em mensagens** (`memory_sources`): é o que permite exclusão consistente e isolamento entre ramificações.
 - **Relações como eventos** ligados a mensagens, não números.
@@ -70,8 +76,10 @@ Funções principais: `discover_characters`, `recommend_characters`, `conversati
 | Integração | Variáveis | Estado |
 |---|---|---|
 | Supabase (banco, auth, storage) | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EXPO_PUBLIC_SUPABASE_*` | **projeto criado e migrado** (`luqxzunlenpsjmfqxfxi`, São Paulo); falta configurar URLs de auth e colocar as chaves nos `.env` |
+| IA grátis sem chave (OVHcloud anônimo, Pollinations) | `FREE_AI` (ligado por padrão) | implementado e testado a partir do Supabase |
+| Gemini (grátis com conta Google) | `GEMINI_API_KEY` | implementado (endpoint compatível com OpenAI) |
+| Embeddings no Supabase (`gte-small`) | automático no Edge | implementado |
 | Anthropic | `ANTHROPIC_API_KEY` | implementado (streaming, visão, cache de prompt) |
 | OpenAI | `OPENAI_API_KEY` | implementado (embeddings, moderação, chat opcional) |
 | Compatível com OpenAI | `COMPAT_API_KEY`, `COMPAT_BASE_URL` | implementado |
-| Redis | `REDIS_URL` | opcional |
 | EAS / lojas | conta Expo | configurado (`eas.json`), aguardando conta |

@@ -34,6 +34,21 @@ create function auth.uid() returns uuid language sql stable as $$
 $$;
 grant execute on function auth.uid() to anon, authenticated, service_role;
 
+-- pg_cron / pg_net / pgcrypto are Supabase extensions not bundled with PGlite: minimal stubs.
+create schema if not exists extensions;
+create function extensions.gen_random_bytes(n integer) returns bytea language sql volatile as $$
+  select substring(decode(md5(random()::text) || md5(random()::text) || md5(random()::text), 'hex') from 1 for n)
+$$;
+create schema cron;
+create table cron.job (jobid serial primary key, jobname text unique, schedule text, command text);
+create function cron.schedule(name text, sched text, cmd text) returns bigint language sql as $$
+  insert into cron.job (jobname, schedule, command) values (name, sched, cmd)
+  on conflict (jobname) do update set schedule = excluded.schedule, command = excluded.command returning jobid
+$$;
+create function cron.unschedule(name text) returns boolean language sql as $$ delete from cron.job where jobname = name returning true $$;
+create schema net;
+create function net.http_post(url text, body jsonb default '{}', params jsonb default '{}', headers jsonb default '{}', timeout_milliseconds int default 5000) returns bigint language sql as $$ select 1::bigint $$;
+
 create schema storage;
 grant usage on schema storage to anon, authenticated, service_role;
 create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
@@ -80,7 +95,8 @@ console.log('Applying migrations');
 await db.exec(STUB);
 for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
   try {
-    await db.exec(readFileSync(join(migrationsDir, file), 'utf8'));
+    const sql = readFileSync(join(migrationsDir, file), 'utf8').replace(/^create extension if not exists (pg_net|pg_cron)[^;]*;$/gm, '-- (stubbed) $&');
+    await db.exec(sql);
     check(file, true);
   } catch (e) {
     check(file, false, e.message);
@@ -281,6 +297,21 @@ console.log('Server helpers');
   check('usage_today', Number(u.chat_messages) === 1 && Number(u.cost_usd) > 0.029);
   await as(bob, async () => {
     await expectError('client cannot call path_messages', () => db.query(`select * from path_messages($1)`, [c]), 'permission denied');
+  });
+}
+
+
+console.log('Worker cron');
+{
+  const job = await one(`select schedule, command from cron.job where jobname = 'vibuzz-worker'`);
+  check('cron job scheduled every minute', job?.schedule === '* * * * *' && job.command.includes('/v1/internal/tick'));
+  const token = (await one(`select value from private.settings where key = 'cron_token'`)).value;
+  check('cron token generated', token.length === 48);
+  check('verify_cron_token accepts token', (await one(`select verify_cron_token($1) as ok`, [token])).ok === true);
+  check('verify_cron_token rejects others', (await one(`select verify_cron_token('nope') as ok`)).ok === false && (await one(`select verify_cron_token('') as ok`)).ok === false);
+  await as(alice, async () => {
+    await expectError('client cannot verify cron token', () => db.query(`select verify_cron_token('x')`), 'permission denied');
+    await expectError('client cannot read private settings', () => db.query(`select * from private.settings`), 'permission denied');
   });
 }
 

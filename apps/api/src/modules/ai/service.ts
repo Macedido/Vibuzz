@@ -5,9 +5,28 @@ import { NotConfiguredError, ProviderError } from '../../lib/errors';
 import { extractJson } from '../../lib/json';
 import { AnthropicProvider } from './providers/anthropic';
 import { OpenAICompatibleProvider } from './providers/openai';
+import { hasSupabaseAi, SupabaseAiEmbeddings } from './providers/supabase-ai';
 import type { Capability, ChatProvider, ChatRequest, ChatResult, ModelRef, ModerationResult, Tier, Usage } from './types';
 
 export const EMBEDDING_DIMENSIONS = 1536;
+
+/** Keyless free models (OVHcloud AI Endpoints anonymous tier, Pollinations). Limits are per IP and per model. */
+export const FREE_ADVANCED = [
+  'ovh:Meta-Llama-3_3-70B-Instruct',
+  'ovh:Mistral-Small-3.2-24B-Instruct-2506',
+  'ovh:gpt-oss-120b',
+  'ovh:Qwen3.6-27B',
+  'ovh:Qwen3.5-397B-A17B',
+  'pollinations:openai',
+] as const;
+export const FREE_FAST = [
+  'ovh:Mistral-Small-3.2-24B-Instruct-2506',
+  'ovh:gpt-oss-20b',
+  'ovh:Qwen3.5-9B',
+  'ovh:Meta-Llama-3_3-70B-Instruct',
+  'pollinations:openai',
+] as const;
+export const FREE_VISION = ['ovh:Mistral-Small-3.2-24B-Instruct-2506', 'ovh:Qwen2.5-VL-72B-Instruct'] as const;
 
 /** USD per million tokens. Override or extend with MODEL_PRICING. */
 const DEFAULT_PRICING: Record<string, { input: number; output: number }> = {
@@ -89,27 +108,63 @@ export class AiService {
     if (env.OPENAI_API_KEY) {
       providers.set('openai', new OpenAICompatibleProvider('openai', env.OPENAI_API_KEY, env.OPENAI_BASE_URL, { official: true }));
     }
+    if (env.GEMINI_API_KEY) providers.set('gemini', new OpenAICompatibleProvider('gemini', env.GEMINI_API_KEY, env.GEMINI_BASE_URL));
     if (env.COMPAT_API_KEY && env.COMPAT_BASE_URL) {
       providers.set('compat', new OpenAICompatibleProvider('compat', env.COMPAT_API_KEY, env.COMPAT_BASE_URL));
     }
-    const hasAnthropic = providers.has('anthropic');
+    const freeAi = env.FREE_AI ?? true;
+    if (freeAi) {
+      providers.set('ovh', new OpenAICompatibleProvider('ovh', env.OVH_API_KEY ?? '', env.OVH_BASE_URL, { firstByteTimeoutMs: 30_000 }));
+      providers.set('pollinations', new OpenAICompatibleProvider('pollinations', '', env.POLLINATIONS_BASE_URL, { chatPath: '/openai', firstByteTimeoutMs: 25_000 }));
+    }
+    if (hasSupabaseAi()) providers.set('supabase', new SupabaseAiEmbeddings());
+
+    const has = (p: string) => providers.has(p);
+    const pick = (...specs: (string | false | undefined)[]) => specs.filter(Boolean).join(',');
+    const free = (list: readonly string[]) => (freeAi ? list.join(',') : '');
     const chains: Partial<Record<Capability, ModelRef[]>> = {
-      fast: parseChain(env.MODEL_FAST ?? (hasAnthropic ? 'anthropic:claude-haiku-5-5' : undefined)),
-      advanced: parseChain(env.MODEL_ADVANCED ?? (hasAnthropic ? 'anthropic:claude-sonnet-5-5' : undefined)),
-      specialized: parseChain(env.MODEL_SPECIALIZED ?? (hasAnthropic ? 'anthropic:claude-opus-5-5' : undefined)),
-      vision: parseChain(env.MODEL_VISION ?? (hasAnthropic ? 'anthropic:claude-sonnet-5-5' : undefined)),
-      embedding: parseChain(env.MODEL_EMBEDDING ?? (providers.has('openai') ? 'openai:text-embedding-3-small' : undefined)),
+      fast: parseChain(
+        env.MODEL_FAST ??
+          pick(has('anthropic') && 'anthropic:claude-haiku-5-5', has('gemini') && 'gemini:gemini-flash-lite-latest', has('openai') && 'openai:gpt-5-mini', free(FREE_FAST)),
+      ),
+      advanced: parseChain(
+        env.MODEL_ADVANCED ??
+          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
+      ),
+      specialized: parseChain(
+        env.MODEL_SPECIALIZED ??
+          pick(has('anthropic') && 'anthropic:claude-opus-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
+      ),
+      vision: parseChain(
+        env.MODEL_VISION ??
+          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5-mini', free(FREE_VISION)),
+      ),
+      // Embedding model must stay the same once memories exist (vectors are not comparable across models).
+      embedding: parseChain(
+        env.MODEL_EMBEDDING ?? (has('supabase') ? 'supabase:gte-small' : has('openai') ? 'openai:text-embedding-3-small' : undefined),
+      ),
     };
     let pricing: Record<string, { input: number; output: number }> = {};
     if (env.MODEL_PRICING) pricing = JSON.parse(env.MODEL_PRICING);
-    const moderation = env.MODERATION_PROVIDER ?? (providers.has('openai') ? 'openai' : 'llm');
+    const moderation = env.MODERATION_PROVIDER ?? (has('openai') ? 'openai' : 'llm');
     return new AiService(providers, chains, sink, pricing, moderation);
+  }
+
+  /** True when a keyed (non-anonymous) chat provider is configured. */
+  get hasPaidChat(): boolean {
+    return ['anthropic', 'openai', 'gemini', 'compat'].some((p) => this.providers.has(p));
+  }
+
+  /** Whether the primary chat model can receive images directly. */
+  get supportsInlineImages(): boolean {
+    return ['anthropic', 'openai', 'gemini'].includes(this.chains.advanced[0]?.provider ?? '');
   }
 
   status(): ProviderStatus {
     const missing: string[] = [];
-    if (!this.chains.advanced.length) missing.push('Modelo de chat (ANTHROPIC_API_KEY ou MODEL_ADVANCED com OPENAI/COMPAT)');
-    if (!this.chains.embedding.length) missing.push('Embeddings (OPENAI_API_KEY ou MODEL_EMBEDDING) — memória usa só palavras-chave');
+    if (!this.chains.advanced.length) missing.push('Modelo de chat (GEMINI_API_KEY, ANTHROPIC_API_KEY ou FREE_AI)');
+    if (!this.chains.embedding.length) missing.push('Embeddings (rodando no Supabase ou OPENAI_API_KEY) — memória usa só palavras-chave');
+    if (!this.hasPaidChat && this.chains.advanced.length) missing.push('Usando IA gratuita sem chave (limitada). Para mais qualidade e volume: GEMINI_API_KEY (grátis)');
     const moderation = this.moderationMode === 'openai' && this.providers.has('openai') ? 'provider' : this.chains.fast.length && this.moderationMode !== 'none' ? 'llm' : 'none';
     if (moderation === 'none') missing.push('Moderação (OPENAI_API_KEY ou um modelo de chat)');
     return {
@@ -164,8 +219,8 @@ export class AiService {
         lastError = e;
         this.record(ref, cap, meta, { inputTokens: 0, outputTokens: 0 }, Date.now() - started, false, String((e as Error).message));
         if (req.signal?.aborted) throw e;
-        const canFallback = !emitted && (!(e instanceof ProviderError) || e.retryable || e.status === 404);
-        if (!canFallback) throw e;
+        // Any failure before the first token moves on to the next model in the chain.
+        if (emitted) throw e;
       }
     }
     throw lastError;

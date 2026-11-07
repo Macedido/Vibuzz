@@ -1,6 +1,6 @@
-import type { FastifyBaseLogger } from 'fastify';
 import type { Env } from './config';
 import { createAdminClient, type Db } from './lib/db';
+import type { Logger } from './lib/log';
 import { StorageService } from './lib/storage';
 import { AiService, type UsageRecord } from './modules/ai/service';
 import { CharacterService } from './modules/characters/service';
@@ -30,10 +30,20 @@ export interface Services {
   creator: CreatorService;
   worker: JobWorker;
   flushUsage: () => Promise<void>;
+  maintenance: () => Promise<void>;
+  /** Lets queued jobs run soon after a request (no-op where a worker loop runs). */
+  kick: () => void;
+}
+
+export interface RuntimeHooks {
+  /** Keeps background work alive after the response (EdgeRuntime.waitUntil on Supabase). */
+  background?: (p: Promise<unknown>) => void;
+  /** Serverless: drain jobs after requests instead of running a loop. */
+  serverless?: boolean;
 }
 
 /** Buffers usage rows and writes them in batches (accounting never blocks a reply). */
-function usageWriter(db: Db, log: FastifyBaseLogger) {
+function usageWriter(db: Db, log: Logger, autoFlush: boolean) {
   let buffer: UsageRecord[] = [];
   const flush = async () => {
     if (!buffer.length) return;
@@ -57,33 +67,40 @@ function usageWriter(db: Db, log: FastifyBaseLogger) {
     );
     if (error) log.error({ err: error.message }, 'usage write failed');
   };
-  const timer = setInterval(() => void flush(), 2000);
-  timer.unref();
+  if (autoFlush) {
+    const timer = setInterval(() => void flush(), 2000) as unknown as { unref?: () => void };
+    timer.unref?.();
+  }
   return {
     sink: (r: UsageRecord) => {
       buffer.push(r);
       if (!r.success) log.warn({ provider: r.provider, model: r.model, kind: r.kind, err: r.error }, 'ai call failed');
-      if (buffer.length >= 50) void flush();
+      if (buffer.length >= 20) void flush();
     },
     flush,
   };
 }
 
-export function createServices(env: Env, log: FastifyBaseLogger): Services {
+export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}): Services {
   const db = createAdminClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-  const usage = usageWriter(db, log);
+  const usage = usageWriter(db, log, !hooks.serverless);
   const ai = AiService.fromEnv(env, usage.sink);
-  const repo = new Repo(db);
+  const repo = new Repo(db, { immediateJobs: hooks.serverless });
   const storage = new StorageService(db);
-  const moderation = new ModerationService(ai, db);
+  const moderation = new ModerationService(ai, db, { moderatePrivateChat: ai.hasPaidChat || env.MODERATE_PRIVATE_CHAT === true });
   const vision = new VisionService(ai);
   const memory = new MemoryService(repo, ai);
   const scene = new SceneService(repo, ai);
-  const firstChat = ai.chains.advanced[0]?.provider;
-  const engine = new IntelligenceEngine(repo, ai, memory, storage, firstChat === 'anthropic' || firstChat === 'openai');
+  const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages);
   const conversations = new ConversationService(env, repo, engine, memory, moderation, vision, storage);
   const characters = new CharacterService(repo, moderation, storage, ai);
   const creator = new CreatorService(ai, vision, storage);
+
+  const maintenance = async () => {
+    const purged = await conversations.maintenancePurge();
+    await db.from('jobs').delete().in('status', ['done', 'failed']).lt('updated_at', new Date(Date.now() - 7 * 86400_000).toISOString());
+    if (purged) log.info({ purged }, 'purged deleted messages');
+  };
 
   const worker = new JobWorker(
     db,
@@ -96,12 +113,31 @@ export function createServices(env: Env, log: FastifyBaseLogger): Services {
     },
     log,
     env.WORKER_CONCURRENCY,
-    async () => {
-      const purged = await conversations.maintenancePurge();
-      await db.from('jobs').delete().in('status', ['done', 'failed']).lt('updated_at', new Date(Date.now() - 7 * 86400_000).toISOString());
-      if (purged) log.info({ purged }, 'purged deleted messages');
-    },
+    maintenance,
   );
 
-  return { env, db, ai, repo, storage, moderation, vision, memory, scene, engine, conversations, characters, creator, worker, flushUsage: usage.flush };
+  const background = hooks.background ?? ((p: Promise<unknown>) => void p.catch(() => {}));
+  const kick = hooks.serverless
+    ? () => background(worker.drain(60_000).then(() => usage.flush()))
+    : () => background(usage.flush());
+
+  return {
+    env,
+    db,
+    ai,
+    repo,
+    storage,
+    moderation,
+    vision,
+    memory,
+    scene,
+    engine,
+    conversations,
+    characters,
+    creator,
+    worker,
+    flushUsage: usage.flush,
+    maintenance: () => worker.maybeMaintain(),
+    kick,
+  };
 }
