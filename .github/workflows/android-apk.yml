@@ -47,7 +47,8 @@ jobs:
       - name: Build APK
         working-directory: apps/mobile/android
         run: |
-          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          # gradle.properties may not end with a newline: start on a fresh line.
+          printf '\norg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g\n' >> gradle.properties
           ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
       - name: Publish release
         env:
