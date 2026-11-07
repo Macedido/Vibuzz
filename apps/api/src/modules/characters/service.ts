@@ -20,7 +20,7 @@ export function slugifyTag(t: string): string {
 }
 
 function sheetText(s: CharacterSheet): string {
-  return [s.name, s.tagline, s.appearance, s.personality, s.biography, s.backstory, s.speechStyle, s.universe, s.scenario, s.firstMessage, s.instructions]
+  return [s.name, s.tagline, s.appearance, s.personality, s.biography, s.backstory, s.speechStyle, s.universe, s.scenario, s.userRole, s.firstMessage, s.instructions]
     .filter(Boolean)
     .join('\n');
 }
