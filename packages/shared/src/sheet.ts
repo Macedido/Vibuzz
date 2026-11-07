@@ -23,11 +23,20 @@ export const relationSchema = z.object({
 export type Relation = z.infer<typeof relationSchema>;
 
 /**
+ * character: the AI is this one character.
+ * narrator: the card is a story — the AI narrates and voices everyone
+ * except the role the user plays (userRole).
+ */
+export const SHEET_MODES = ['character', 'narrator'] as const;
+export type SheetMode = (typeof SHEET_MODES)[number];
+
+/**
  * The structured character sheet ("ficha"). Every field is optional except
  * the name, so creators never have to fill everything.
  */
 export const characterSheetSchema = z.object({
   name: z.string().trim().min(1).max(FIELD_LIMITS.short),
+  mode: z.enum(SHEET_MODES).default('character').catch('character'),
   gender: short.optional().default(''),
   age: short.optional().default(''),
   tagline: z.string().trim().max(160).optional().default(''),
@@ -45,6 +54,8 @@ export const characterSheetSchema = z.object({
   relations: z.array(relationSchema).max(30).optional().default([]),
   universe: long.optional().default(''),
   scenario: long.optional().default(''),
+  /** Who the user plays in this story (the AI never speaks or acts for this role). */
+  userRole: long.optional().default(''),
   firstMessage: long.optional().default(''),
   instructions: long.optional().default(''),
 });
@@ -69,6 +80,7 @@ export const SHEET_FIELDS: { key: keyof CharacterSheet; label: string; size: 'sh
   { key: 'behaviors', label: 'Comportamentos', size: 'medium' },
   { key: 'universe', label: 'Universo', size: 'long' },
   { key: 'scenario', label: 'Cenário inicial', size: 'long' },
+  { key: 'userRole', label: 'Seu papel na história', size: 'long', hint: 'Quem você interpreta (a IA nunca fala nem age por esse papel)' },
   { key: 'firstMessage', label: 'Primeira mensagem', size: 'long' },
   { key: 'instructions', label: 'Instruções adicionais', size: 'long', hint: 'Regras de comportamento para a IA' },
 ];
