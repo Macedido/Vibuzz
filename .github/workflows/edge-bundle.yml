@@ -1,0 +1,43 @@
+name: Build edge bundle
+# Rebuilds supabase/functions/vibuzz-api/bundle.js from apps/api/src (after the
+# API tests pass) and commits it, so the Supabase Edge Function can import the
+# bundle from a pinned commit. See docs/SETUP.md, "API no Supabase".
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/src/**'
+      - 'apps/api/scripts/build-edge.mjs'
+      - 'packages/shared/src/**'
+      - 'package-lock.json'
+      - '.github/workflows/edge-bundle.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: edge-bundle
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -w @vibuzz/api
+      - run: npm run build:edge
+      - name: Commit the bundle if it changed
+        run: |
+          if git diff --quiet -- supabase/functions/vibuzz-api; then
+            echo "Bundle unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/vibuzz-api
+          git commit -m "Rebuild edge bundle from ${GITHUB_SHA::7}"
+          git pull --rebase origin main
+          git push origin HEAD:main
