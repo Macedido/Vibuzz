@@ -129,3 +129,37 @@ describe('buildTranscript', () => {
     expect((t[0].content as { type: string }[])[1].type).toBe('image');
   });
 });
+
+describe('narrator mode (story cards where the user plays a role)', () => {
+  const story = characterSheetSchema.parse({
+    name: 'MHA x Lolbit',
+    mode: 'narrator',
+    scenario: 'Sala 1-A. Emily finge ser Lolbit.',
+    userRole: 'Você é a verdadeira Lolbit, em forma humana. Só Deku e os professores sabem.',
+    relations: [
+      { name: 'Emily', kind: 'colega', description: 'Mente que vira Lolbit para chamar atenção' },
+      { name: 'Deku', kind: 'amigo', description: 'Sabe o segredo de {{user}}' },
+    ],
+  });
+
+  it('makes the AI narrate the cast and never play the user role', () => {
+    const p = buildSystemPrompt({ ...base, character: { name: story.name, sheet: story, maturity: 'general' } });
+    expect(p.stable).toContain('You are the narrator of the interactive story "MHA x Lolbit"');
+    expect(p.stable).toContain("never write that character's lines");
+    expect(p.stable).toContain('second person ("você", "you", {{user}}) means the user\'s character');
+    expect(p.stable).toContain("the user's role (played by the user, never by you): Você é a verdadeira Lolbit");
+    expect(p.stable).toContain('cast (characters you voice):');
+    expect(p.stable).toContain('Sabe o segredo de Lucas');
+    expect(p.stable).toContain('school students are minors');
+    expect(p.stable).not.toContain('You are MHA x Lolbit.');
+  });
+
+  it('keeps character mode as before and accepts unknown modes safely', () => {
+    expect(characterSheetSchema.parse({ name: 'X' }).mode).toBe('character');
+    expect(characterSheetSchema.parse({ name: 'X', mode: 'banana' }).mode).toBe('character');
+    const withRole = characterSheetSchema.parse({ name: 'Kael', userRole: 'Você é o novo vizinho' });
+    const p = buildSystemPrompt({ ...base, character: { name: 'Kael', sheet: withRole, maturity: 'general' } });
+    expect(p.stable).toContain('You are Kael.');
+    expect(p.stable).toContain("The sheet defines the user's role");
+  });
+});
