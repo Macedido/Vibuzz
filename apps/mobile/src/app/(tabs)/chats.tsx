@@ -19,7 +19,7 @@ export default function Chats() {
       (unwrap(
         await supabase
           .from('conversations')
-          .select('id, title, character_id, persona_id, is_favorite, is_archived, creativity, last_message_at, last_message_preview, active_leaf_id, character:characters(id, name, avatar_path, kind)')
+          .select('id, title, character_id, persona_id, is_favorite, is_archived, creativity, last_message_at, last_message_preview, active_leaf_id, character:characters!conversations_character_id_fkey(id, name, avatar_path, kind)')
           .order('last_message_at', { ascending: false })
           .limit(300),
       ) as unknown as ConversationItem[]) ?? [],
