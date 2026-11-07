@@ -34,6 +34,9 @@ const envSchema = z.object({
   OVH_BASE_URL: z.string().url().default('https://oai.endpoints.kepler.ai.cloud.ovh.net/v1'),
   OVH_API_KEY: z.string().optional(),
   POLLINATIONS_BASE_URL: z.string().url().default('https://text.pollinations.ai'),
+  /** Free, keyless image model for character portraits. Set IMAGE_GEN=false to turn it off. */
+  POLLINATIONS_IMAGE_URL: z.string().url().default('https://image.pollinations.ai'),
+  IMAGE_GEN: bool,
   /** Run the classifier on every private chat message (default: only with a keyed provider). */
   MODERATE_PRIVATE_CHAT: bool,
 
