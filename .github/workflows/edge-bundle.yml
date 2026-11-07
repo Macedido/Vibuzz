@@ -14,14 +14,18 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+# Runs one at a time and always builds the latest main, so a late run never
+# overwrites a newer bundle.
 concurrency:
   group: edge-bundle
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -31,13 +35,22 @@ jobs:
       - run: npm run build:edge
       - name: Commit the bundle if it changed
         run: |
-          if git diff --quiet -- supabase/functions/vibuzz-api; then
-            echo "Bundle unchanged."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add supabase/functions/vibuzz-api
-          git commit -m "Rebuild edge bundle from ${GITHUB_SHA::7}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          for attempt in 1 2 3; do
+            if git diff --quiet -- supabase/functions/vibuzz-api; then
+              echo "Bundle up to date."
+              exit 0
+            fi
+            src=$(git rev-parse --short HEAD)
+            git add supabase/functions/vibuzz-api
+            git commit -m "Rebuild edge bundle from $src"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "main moved; rebuilding on top of it"
+            git fetch origin main
+            git reset --hard origin/main
+            npm run build:edge
+          done
+          exit 1
