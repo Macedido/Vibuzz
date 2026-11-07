@@ -1,0 +1,66 @@
+name: Android APK
+
+# Builds an installable APK of the app and publishes it as a GitHub release.
+# Download: https://github.com/<user>/<repo>/releases/latest/download/vibuzz.apk
+# Signed with the debug key (fine for sharing/sideloading; Play Store needs a release key).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/shared/**'
+      - '.github/workflows/android-apk.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+env:
+  # Public values (safe to ship). The service_role key never goes here.
+  EXPO_PUBLIC_SUPABASE_URL: https://luqxzunlenpsjmfqxfxi.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_sXtWWzgKxHKRNbvziWGs6w_KaL13Kjl
+  EXPO_PUBLIC_API_URL: ${{ vars.API_URL || 'https://luqxzunlenpsjmfqxfxi.supabase.co/functions/v1/vibuzz-api' }}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Generate the Android project
+        working-directory: apps/mobile
+        run: npx expo prebuild --platform android --no-install --clean
+      - name: Build APK
+        working-directory: apps/mobile/android
+        run: |
+          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g" >> gradle.properties
+          ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk vibuzz.apk
+          VERSION=$(node -p "require('./apps/mobile/app.json').expo.version")
+          TAG="apk-v${VERSION}-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" vibuzz.apk --latest --title "Vibuzz ${VERSION} (Android)" \
+            --notes "APK do Vibuzz para Android. Baixe no celular, abra e permita instalar apps desta fonte. Commit ${GITHUB_SHA::7}."
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vibuzz-apk
+          path: vibuzz.apk
+          if-no-files-found: ignore
