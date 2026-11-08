@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Banner } from '@/components/ui';
+import { Banner, HeaderBack } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { checkNotifications, onNotificationTap } from '@/lib/native-notify';
 import { setupPwa } from '@/lib/pwa';
@@ -75,6 +75,7 @@ function Gate() {
         headerShadowVisible: false,
         headerTransparent: false,
         headerBackButtonDisplayMode: 'minimal',
+        headerLeft: () => <HeaderBack />,
         contentStyle: { backgroundColor: colors.bg },
         animation: 'slide_from_right',
       }}
