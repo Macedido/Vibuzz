@@ -168,7 +168,7 @@ export default function Settings() {
         </Section>
 
         <Section title="Seu plano">
-          <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={isPremiumActive(account) ? `Ativo${account?.premium_until ? ` até ${new Date(account.premium_until).toLocaleDateString('pt-BR')}` : ''}` : 'Mais mensagens, memória e fotos'} onPress={() => router.push('/premium')} />
+          <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={isPremiumActive(account) ? `Ativo${account?.premium_until ? ` até ${new Date(account.premium_until).toLocaleDateString('pt-BR')}` : ''}` : 'Mais mensagens, memória e respostas longas'} onPress={() => router.push('/premium')} />
           <ListItem icon="trophy-outline" title="Conquistas" onPress={() => router.push('/achievements')} />
         </Section>
 
