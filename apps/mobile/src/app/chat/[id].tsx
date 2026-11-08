@@ -354,11 +354,20 @@ export default function ChatScreen() {
   };
 
   const remove = async (m: UiMessage, purge: boolean) => {
+    // Hide it right away: your message plus the replies under it (until your next message).
+    setMessages((prev) => {
+      const i = prev.findIndex((x) => x.id === m.id);
+      if (i === -1) return prev;
+      let j = i + 1;
+      if (m.role === 'user') while (j < prev.length && prev[j].role === 'assistant') j++;
+      return [...prev.slice(0, i), ...prev.slice(j)];
+    });
     try {
       await api(`/v1/messages/${m.id}?purge=${purge ? 1 : 0}`, { method: 'DELETE' });
       await loadPath();
     } catch (e) {
       setError(errorMessage(e));
+      await loadPath();
     }
   };
 
@@ -571,7 +580,7 @@ export default function ChatScreen() {
       if (m.role === 'assistant' && m.parent_id) acts.push({ label: 'Regenerar resposta', icon: 'refresh', onPress: () => regenerate(m) });
       if (m.role === 'assistant' && m.id === last?.id) acts.push({ label: 'Continuar resposta', icon: 'play-forward-outline', onPress: () => run(`/v1/conversations/${id}/continue`, {}) });
       acts.push({ label: m.is_pinned ? 'Desafixar' : 'Fixar mensagem', icon: m.is_pinned ? 'pin' : 'pin-outline', onPress: () => togglePin(m) });
-      acts.push({ label: 'Apagar…', icon: 'trash-outline', danger: true, onPress: () => setDeleting(m) });
+      acts.push({ label: m.role === 'user' ? 'Apagar (com a resposta)' : 'Apagar', icon: 'trash-outline', danger: true, onPress: () => setDeleting(m) });
     }
     return acts;
   };
@@ -636,8 +645,18 @@ export default function ChatScreen() {
               {m.is_spontaneous ? <Text style={[styles.emotion, { color: colors.signal }]}>mandou sozinho</Text> : null}
             </Row>
           ) : null}
-          <Row gap={6} style={{ marginTop: 3, paddingHorizontal: 4 }}>
+          <Row gap={8} style={{ marginTop: 3, paddingHorizontal: 4 }}>
             {m.is_pinned ? <Ionicons name="pin" size={11} color={colors.accent} /> : null}
+            {mine && !m.id.startsWith('temp-') && !busy ? (
+              <Pressable onPress={() => setDeleting(m)} hitSlop={8} accessibilityLabel="Apagar mensagem">
+                <Ionicons name="trash-outline" size={14} color={colors.muted} />
+              </Pressable>
+            ) : null}
+            {!m.id.startsWith('temp-') && !m.streaming ? (
+              <Pressable onPress={() => setMenuFor(m)} hitSlop={8} accessibilityLabel="Mais opções">
+                <Ionicons name="ellipsis-horizontal" size={14} color={colors.muted} />
+              </Pressable>
+            ) : null}
             {!mine && !m.streaming && m.content ? (
               <Pressable onPress={() => listen(m)} hitSlop={8} accessibilityLabel="Ouvir mensagem">
                 <Ionicons name={speakingId === m.id ? 'stop-circle-outline' : 'volume-medium-outline'} size={14} color={speakingId === m.id ? colors.signal : colors.muted} />
@@ -844,12 +863,16 @@ export default function ChatScreen() {
       <ActionSheet
         visible={Boolean(deleting)}
         onClose={() => setDeleting(null)}
-        title="Apagar mensagem"
+        title={deleting?.role === 'user' ? 'Apagar sua mensagem? A resposta do personagem também some.' : 'Apagar esta resposta?'}
         actions={
           deleting
             ? [
-                { label: 'Remover do histórico', icon: 'eye-off-outline', onPress: () => remove(deleting, false) },
-                { label: 'Apagar definitivamente (e memórias)', icon: 'trash', danger: true, onPress: () => remove(deleting, true) },
+                {
+                  label: deleting.role === 'user' ? 'Apagar mensagem e resposta' : 'Apagar resposta',
+                  icon: 'trash',
+                  danger: true,
+                  onPress: () => remove(deleting, true),
+                },
               ]
             : []
         }
@@ -902,7 +925,7 @@ export default function ChatScreen() {
         <Text style={[type.small, { marginTop: space.xs }]}>
           {meta.conversation.proactive_mode === 'off'
             ? `${title.split(' ')[0]} só fala quando você falar.`
-            : `${title.split(' ')[0]} pode mandar mensagem, foto ou contar algo que aconteceu quando você sumir (entre 8h e 23h). Nunca duas seguidas sem você responder.`}
+            : `${title.split(' ')[0]} pode mandar mensagem ou contar algo que aconteceu quando você sumir (entre 8h e 23h). Nunca duas seguidas sem você responder.`}
         </Text>
         {meta.conversation.proactive_mode !== 'off' ? (
           <Row gap={space.sm} style={{ marginTop: space.sm, flexWrap: 'wrap' }}>
@@ -918,7 +941,7 @@ export default function ChatScreen() {
           ))}
         </ChipScroller>
         <View style={{ marginTop: space.lg, gap: space.sm, marginBottom: space.lg }}>
-          <Button title="Galeria de fotos" variant="secondary" icon="images-outline" onPress={() => { setSettings(false); router.push(`/gallery/${id}`); }} />
+          <Button title="Galeria de imagens" variant="secondary" icon="images-outline" onPress={() => { setSettings(false); router.push(`/gallery/${id}`); }} />
           <Button title="Relação" variant="secondary" icon="heart-half-outline" onPress={() => { setSettings(false); router.push(`/relationship/${id}`); }} />
           <Button title="Memórias do personagem" variant="secondary" icon="bulb-outline" onPress={() => { setSettings(false); router.push(`/memories/${id}`); }} />
           <Button
