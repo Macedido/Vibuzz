@@ -22,6 +22,12 @@ export interface ChatRequest {
   /** Reasoning effort hint (providers that support it). */
   effort?: 'low' | 'medium' | 'high';
   signal?: AbortSignal;
+  /**
+   * If the current model has not produced its first token after this many ms, the
+   * next model in the chain starts in parallel and whichever answers first wins.
+   * Defaults: 5 s for streamed text, 12 s for JSON tasks. 0 disables hedging.
+   */
+  hedgeMs?: number;
 }
 
 export interface Usage {

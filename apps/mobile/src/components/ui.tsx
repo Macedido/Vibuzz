@@ -1,6 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import type { ComponentProps, ReactNode } from 'react';
 import {
@@ -21,7 +20,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mediaUrl } from '@/lib/supabase';
-import { colors, radius, space, type } from '@/lib/theme';
+import { paletteFor } from '@/components/character-card';
+import { colors, fonts, radius, space, type } from '@/lib/theme';
 
 export type IconName = ComponentProps<typeof Ionicons>['name'];
 export { Ionicons };
@@ -283,9 +283,9 @@ export function Avatar({ path, uri, name, size = 44, ring }: { path?: string | n
       {src ? (
         <Image source={{ uri: src }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
       ) : (
-        <LinearGradient colors={[colors.signal, '#3B2F7A']} style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]}>
-          <Text style={{ color: '#fff', fontWeight: '800', fontSize: size * 0.36 }}>{initials}</Text>
-        </LinearGradient>
+        <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', backgroundColor: paletteFor(name ?? '?')[1] }]}>
+          <Text style={{ color: '#fff', fontFamily: fonts.displaySemi, fontSize: size * (initials.length > 1 ? 0.32 : 0.4) }}>{initials}</Text>
+        </View>
       )}
     </View>
   );

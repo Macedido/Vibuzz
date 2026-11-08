@@ -32,6 +32,12 @@ function fakeServices(overrides: Partial<Record<string, unknown>> = {}) {
     worker: { drain: vi.fn(async () => 2) },
     maintenance: vi.fn(async () => {}),
     life: { runDue: vi.fn(async () => 1) },
+    billing: {
+      info: () => ({ enabled: true, currency: 'BRL', prices: { month: 14.9, year: 149 } }),
+      process: vi.fn(async () => ({ status: 'approved', userId: USER, plan: 'month', premiumUntil: null })),
+      verifyWebhook: vi.fn(async () => true),
+      checkout: vi.fn(async () => ({ url: 'https://mp.test', preferenceId: 'p' })),
+    },
     flushUsage: vi.fn(async () => {}),
     kick: vi.fn(),
     ...overrides,
@@ -41,6 +47,19 @@ function fakeServices(overrides: Partial<Record<string, unknown>> = {}) {
 const auth = { authorization: 'Bearer good', 'content-type': 'application/json' };
 
 describe('HTTP API', () => {
+  it('exposes prices and the payment webhook without login, checkout only with login', async () => {
+    const services = fakeServices();
+    const app = buildApp(services);
+    expect(((await (await app.request('/v1/billing')).json()) as { prices: { month: number } }).prices.month).toBe(14.9);
+    const hook = await app.request('/v1/billing/webhook?data.id=123&type=payment', { method: 'POST', body: JSON.stringify({ type: 'payment', data: { id: '123' } }) });
+    expect(await hook.json()).toEqual({ ok: true, status: 'approved' });
+    expect((services as unknown as { billing: { process: ReturnType<typeof vi.fn> } }).billing.process).toHaveBeenCalledWith('123');
+    expect((await app.request('/v1/billing/checkout', { method: 'POST', body: JSON.stringify({ plan: 'month' }) })).status).toBe(401);
+    const ok = await app.request('/v1/billing/checkout', { method: 'POST', headers: auth, body: JSON.stringify({ plan: 'month' }) });
+    expect(((await ok.json()) as { url: string }).url).toBe('https://mp.test');
+    expect((await app.request('/v1/billing/checkout', { method: 'POST', headers: auth, body: JSON.stringify({ plan: 'vitalicio' }) })).status).toBe(400);
+  });
+
   it('serves health and status without auth, with CORS', async () => {
     const app = buildApp(fakeServices());
     expect(await (await app.request('/health')).json()).toEqual({ ok: true });

@@ -162,9 +162,44 @@ export type MeterKey = (typeof METERS)[number]['key'];
 
 /** Limits by plan. The free plan stays fully usable. */
 export const PLAN_LIMITS = {
-  free: { imagesPerDay: 12, proactivePerDay: { sometimes: 2, often: 6 }, privateCharacters: 20, memoryItems: 12 },
-  premium: { imagesPerDay: 80, proactivePerDay: { sometimes: 3, often: 16 }, privateCharacters: 200, memoryItems: 24 },
+  free: {
+    messagesPerDay: 200,
+    imagesPerDay: 12,
+    proactivePerDay: { sometimes: 2, often: 6 },
+    privateCharacters: 20,
+    memoryItems: 12,
+    replyTokens: 1200,
+    /** ms before a slow model gets a parallel backup. */
+    hedgeMs: 5000,
+    photoSize: { width: 768, height: 960 },
+  },
+  premium: {
+    messagesPerDay: 2000,
+    imagesPerDay: 80,
+    proactivePerDay: { sometimes: 3, often: 16 },
+    privateCharacters: 200,
+    memoryItems: 24,
+    replyTokens: 2000,
+    hedgeMs: 2500,
+    photoSize: { width: 1024, height: 1280 },
+  },
 } as const;
+
+export const BILLING_PLANS = ['month', 'year'] as const;
+export type BillingPlan = (typeof BILLING_PLANS)[number];
+export const checkoutSchema = z.object({ plan: z.enum(BILLING_PLANS) });
+export const confirmPaymentSchema = z.object({ paymentId: z.string().trim().regex(/^\d{1,20}$/) });
+export interface BillingInfo {
+  enabled: boolean;
+  currency: 'BRL';
+  prices: Record<BillingPlan, number>;
+}
+
+/** Premium is active while premium_until is in the future (or set by hand without an end date). */
+export function isPremiumActive(a: { plan?: string | null; premium_until?: string | null } | null | undefined): boolean {
+  if (!a || a.plan !== 'premium') return false;
+  return !a.premium_until || new Date(a.premium_until).getTime() > Date.now();
+}
 export type Plan = keyof typeof PLAN_LIMITS;
 
 export const PROACTIVE_MODES = ['off', 'sometimes', 'often'] as const;

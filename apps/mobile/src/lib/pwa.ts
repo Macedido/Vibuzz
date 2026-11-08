@@ -16,6 +16,23 @@ const installListeners = new Set<() => void>();
 export function setupPwa() {
   if (Platform.OS !== 'web' || typeof document === 'undefined') return;
   const base = basePath();
+  if (!document.getElementById('vibuzz-base-css')) {
+    // Dark native controls and a slim scrollbar in the app's colors (the browser default is white).
+    const style = document.createElement('style');
+    style.id = 'vibuzz-base-css';
+    style.textContent = `
+      :root { color-scheme: dark; }
+      html, body { background: #03041A; }
+      * { scrollbar-width: thin; scrollbar-color: #2A3468 transparent; }
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #232C57; border-radius: 10px; border: 2px solid #03041A; }
+      ::-webkit-scrollbar-thumb:hover { background: #34407A; }
+      ::-webkit-scrollbar-corner { background: transparent; }
+      ::selection { background: rgba(42, 125, 255, 0.45); }
+    `;
+    document.head.appendChild(style);
+  }
   if (!document.querySelector('link[rel="manifest"]')) {
     const link = document.createElement('link');
     link.rel = 'manifest';

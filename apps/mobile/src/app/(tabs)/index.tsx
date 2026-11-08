@@ -1,6 +1,5 @@
 import { CATEGORIES } from '@vibuzz/shared';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -11,7 +10,7 @@ import { errorMessage } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { brandGradient, colors, radius, space, type } from '@/lib/theme';
+import { colors, fonts, radius, space, type } from '@/lib/theme';
 import { compact, timeAgo, type CharacterCard, type ConversationItem } from '@/lib/types';
 
 const LOGO = require('@/assets/images/logo-mark.png');
@@ -110,9 +109,9 @@ function RankRow({ c }: { c: Ranked }) {
   return (
     <Row gap={space.sm} style={{ marginBottom: 2 }}>
       {top ? (
-        <LinearGradient colors={[...brandGradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rank}>
+        <View style={[styles.rank, { backgroundColor: colors.accent }]}>
           <Text style={[styles.rankText, { color: '#fff' }]}>{c.rank}</Text>
-        </LinearGradient>
+        </View>
       ) : (
         <View style={[styles.rank, { backgroundColor: colors.surface }]}>
           <Text style={styles.rankText}>{c.rank}</Text>
@@ -282,8 +281,8 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: space.md, paddingHorizontal: space.lg, paddingBottom: space.sm, backgroundColor: colors.bg },
   logo: { width: 32, height: 32 },
   rank: { width: 34, height: 34, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  rankText: { color: colors.textSoft, fontWeight: '900', fontSize: 15 },
-  brand: { color: colors.text, fontWeight: '900', fontSize: 20, letterSpacing: -0.6 },
+  rankText: { color: colors.textSoft, fontFamily: fonts.display, fontSize: 14 },
+  brand: { color: colors.text, fontFamily: fonts.display, fontSize: 18, letterSpacing: -0.4 },
   search: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: space.sm, height: 40, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderSoft, paddingHorizontal: space.md, maxWidth: 520 },
   tabsWrap: { backgroundColor: colors.bg, paddingTop: space.lg, paddingBottom: space.md },
   tab: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.pill },

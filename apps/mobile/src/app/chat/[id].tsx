@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -137,6 +139,31 @@ export default function ChatScreen() {
   const callOn = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const listRef = useRef<FlatList<UiMessage>>(null);
+  // Follow new messages only while the reader is at the bottom; otherwise offer a "go down" button.
+  const atBottom = useRef(true);
+  const [showDown, setShowDown] = useState(false);
+  const [unseen, setUnseen] = useState(false);
+  const toBottom = useCallback((animated = false) => {
+    atBottom.current = true;
+    setShowDown(false);
+    setUnseen(false);
+    listRef.current?.scrollToEnd({ animated });
+    // Late layout (images, emotion chips) can add height after the first jump.
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: false }));
+    setTimeout(() => atBottom.current && listRef.current?.scrollToEnd({ animated: false }), 140);
+  }, []);
+  const onListScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const gap = contentSize.height - layoutMeasurement.height - contentOffset.y;
+    const near = gap < 120;
+    atBottom.current = near;
+    setShowDown((v) => (v === !near ? v : !near));
+    if (near) setUnseen(false);
+  }, []);
+  const onListGrow = useCallback(() => {
+    if (atBottom.current) toBottom(false);
+    else setUnseen(true);
+  }, [toBottom]);
 
   const names = useMemo(() => {
     const m = new Map<string, { name: string; avatar: string | null }>();
@@ -276,6 +303,7 @@ export default function ChatScreen() {
       setText('');
       setImages([]);
     }
+    toBottom(true);
     const tempId = `temp-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
@@ -605,7 +633,7 @@ export default function ChatScreen() {
                   {EMOTION_LABELS[m.emotion].emoji} {EMOTION_LABELS[m.emotion].label}
                 </Text>
               ) : null}
-              {m.is_spontaneous ? <Text style={[styles.emotion, { color: colors.signal }]}>✦ mandou do nada</Text> : null}
+              {m.is_spontaneous ? <Text style={[styles.emotion, { color: colors.signal }]}>mandou sozinho</Text> : null}
             </Row>
           ) : null}
           <Row gap={6} style={{ marginTop: 3, paddingHorizontal: 4 }}>
@@ -708,13 +736,17 @@ export default function ChatScreen() {
         </View>
       ) : null}
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.top + 44}>
+        <View style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
           renderItem={renderItem}
           contentContainerStyle={{ padding: space.md, paddingBottom: space.lg, maxWidth: 820, width: '100%', alignSelf: 'center' }}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+          onScroll={onListScroll}
+          scrollEventThrottle={64}
+          onContentSizeChange={onListGrow}
+          onLayout={() => atBottom.current && listRef.current?.scrollToEnd({ animated: false })}
           ListEmptyComponent={<Text style={[type.small, { textAlign: 'center', marginTop: space.xxl }]}>Diga olá para começar a história.</Text>}
           ListFooterComponent={
             typingName ? (
@@ -725,10 +757,18 @@ export default function ChatScreen() {
             ) : undefined
           }
         />
+        {showDown ? (
+          <Pressable onPress={() => toBottom(true)} style={({ pressed }) => [styles.downBtn, pressed && { opacity: 0.85 }]} accessibilityRole="button" accessibilityLabel="Ir para a mensagem mais recente">
+            <Ionicons name="arrow-down" size={20} color={colors.text} />
+            {unseen ? <View style={styles.downDot} /> : null}
+          </Pressable>
+        ) : null}
+        </View>
 
         {error ? (
           <View style={{ paddingHorizontal: space.md }}>
             <Banner tone="danger" text={error} />
+            {/Premium/.test(error) ? <Button title="Ver o Premium" small variant="secondary" onPress={() => router.push('/premium')} style={{ alignSelf: 'flex-start', marginTop: -space.sm, marginBottom: space.sm }} /> : null}
           </View>
         ) : null}
 
@@ -936,6 +976,21 @@ const styles = StyleSheet.create({
   userBubble: { backgroundColor: colors.userBubble, borderTopRightRadius: 6 },
   botBubble: { backgroundColor: 'rgba(22,22,32,0.86)', borderTopLeftRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   chatImage: { width: 180, height: 180, borderRadius: 12 },
+  downBtn: {
+    position: 'absolute',
+    right: space.lg,
+    bottom: space.md,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.raised,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...Platform.select({ web: { boxShadow: '0 6px 18px rgba(0,0,0,0.45)' } as object, default: { elevation: 4 } }),
+  },
+  downDot: { position: 'absolute', top: 8, right: 9, width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
   composer: { paddingHorizontal: space.sm, paddingTop: space.sm, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: 'rgba(10,10,15,0.9)', width: '100%', maxWidth: 860, alignSelf: 'center' },
   input: { flex: 1, minHeight: 44, maxHeight: 140, backgroundColor: 'rgba(26,26,37,0.95)', borderRadius: 22, borderWidth: 1, borderColor: colors.border, color: colors.text, paddingHorizontal: space.lg, paddingTop: 11, paddingBottom: 11, fontSize: 15 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },

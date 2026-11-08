@@ -20,11 +20,51 @@ const SAFE = 'safe for work, fully clothed, no nudity, no gore, no text, no wate
  * stored in the public media bucket and still goes through image moderation when
  * the character is saved.
  */
+export interface GeminiImageConfig {
+  apiKey: string;
+  /** Model URL bases to try (Vertex express for "AQ." keys, Gemini API for "AIza" keys). */
+  bases: string[];
+  models?: string[];
+}
+
+/** Gemini image models, best first; unknown ones are skipped (404). */
+export const GEMINI_IMAGE_MODELS = ['gemini-2.5-flash-image', 'gemini-3.1-flash-image-preview'];
+
+function aspectFor(width: number, height: number): string {
+  const r = width / height;
+  const options: [string, number][] = [
+    ['1:1', 1],
+    ['4:5', 0.8],
+    ['3:4', 0.75],
+    ['2:3', 0.667],
+    ['9:16', 0.5625],
+    ['5:4', 1.25],
+    ['4:3', 1.333],
+    ['16:9', 1.778],
+  ];
+  return options.reduce((best, o) => (Math.abs(o[1] - r) < Math.abs(best[1] - r) ? o : best))[0];
+}
+
+function fromB64(data: string): Uint8Array {
+  const bin = atob(data);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function toB64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
 export class ImageService {
   constructor(
     private ai: AiService,
     private db: Db,
-    private opts: { baseUrl: string; fetch?: typeof fetch } = { baseUrl: 'https://image.pollinations.ai' },
+    private opts: { baseUrl: string; fetch?: typeof fetch; gemini?: GeminiImageConfig; log?: (msg: string, extra?: object) => void } = {
+      baseUrl: 'https://image.pollinations.ai',
+    },
   ) {}
 
   async portraitPrompt(sheet: CharacterSheet, style: PortraitStyle, userId: string): Promise<string> {
@@ -64,33 +104,116 @@ export class ImageService {
    * A photo the character sends in the chat ("[foto: ...]"). The character's look is
    * added so the same person appears across photos; stored in the private chat bucket.
    */
-  async generateChatPhoto(opts: { userId: string; conversationId: string; description: string; sheet: CharacterSheet; style?: PortraitStyle }): Promise<string> {
+  async generateChatPhoto(opts: {
+    userId: string;
+    conversationId: string;
+    description: string;
+    sheet: CharacterSheet;
+    style?: PortraitStyle;
+    size?: { width: number; height: number };
+    /** Character avatar in the media bucket: keeps the same face across photos. */
+    referencePath?: string | null;
+  }): Promise<string> {
     const look = [opts.sheet.mode === 'narrator' ? '' : opts.sheet.appearance, opts.sheet.universe].filter(Boolean).join('. ').slice(0, 360);
     const minor = sheetSuggestsMinor(opts.sheet) ? 'age-appropriate, non-suggestive, ' : '';
     const prompt = `${opts.description.slice(0, 400)}. ${look ? `Character look: ${look}. ` : ''}${minor}${PORTRAIT_STYLES[opts.style ?? 'anime']}, ${SAFE}`;
-    return this.render(prompt, 'chat', `${opts.userId}/${opts.conversationId}/foto`, 832, 1040);
+    const reference = opts.referencePath ? await this.loadReference(opts.referencePath) : null;
+    return this.render(prompt, 'chat', `${opts.userId}/${opts.conversationId}/foto`, opts.size?.width ?? 768, opts.size?.height ?? 960, reference);
   }
 
-  private async render(prompt: string, bucket: 'media' | 'chat', prefix: string, width: number, height: number): Promise<string> {
+  private async loadReference(path: string): Promise<{ bytes: Uint8Array; mime: string } | null> {
+    try {
+      const { data } = await this.db.storage.from('media').download(path);
+      if (!data) return null;
+      const bytes = new Uint8Array(await data.arrayBuffer());
+      const mime = imageMime(bytes);
+      return mime && bytes.byteLength < 4_000_000 ? { bytes, mime } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Gemini image model (sharp, coherent anatomy; follows a reference picture).
+   * Returns null when it is not configured or not available, so the caller can fall back.
+   */
+  private async gemini(prompt: string, width: number, height: number, reference: { bytes: Uint8Array; mime: string } | null): Promise<Uint8Array | null> {
+    const g = this.opts.gemini;
+    if (!g) return null;
+    const doFetch = this.opts.fetch ?? fetch;
+    const text = reference
+      ? `Create a new picture of the character shown in the attached reference image (same face, hair, body type, colors and art style). Scene: ${prompt}`
+      : `Create a picture. ${prompt}`;
+    const body = JSON.stringify({
+      contents: [{ role: 'user', parts: [...(reference ? [{ inlineData: { mimeType: reference.mime, data: toB64(reference.bytes) } }] : []), { text }] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: aspectFor(width, height) } },
+    });
+    for (const base of g.bases) {
+      for (const model of g.models ?? GEMINI_IMAGE_MODELS) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 70_000);
+        try {
+          const res = await doFetch(`${base}/${model}:generateContent`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-goog-api-key': g.apiKey },
+            body,
+            signal: ctrl.signal,
+          });
+          if (res.status === 404 || res.status === 400) continue; // model not offered here
+          if (res.status === 401 || res.status === 403) break; // key not valid for this base
+          if (!res.ok) {
+            this.opts.log?.('gemini image failed', { status: res.status, model });
+            return null; // quota or overload: use the backup generator
+          }
+          const json = (await res.json()) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[] };
+          const data = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data)?.inlineData?.data;
+          if (!data) {
+            this.opts.log?.('gemini image empty (likely safety)', { model });
+            return null;
+          }
+          return fromB64(data);
+        } catch (e) {
+          this.opts.log?.('gemini image error', { model, err: String((e as Error).message) });
+          return null;
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    }
+    return null;
+  }
+
+  private async pollinations(prompt: string, width: number, height: number): Promise<Uint8Array> {
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const url = `${this.opts.baseUrl}/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&safe=true&model=flux&seed=${seed}`;
+    const url = `${this.opts.baseUrl}/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true&safe=true&model=flux&enhance=true&seed=${seed}`;
     const doFetch = this.opts.fetch ?? fetch;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 100_000);
-    let bytes: Uint8Array;
     try {
       const res = await doFetch(url, { signal: ctrl.signal, headers: { accept: 'image/*' } });
       if (!res.ok) throw new AppError(502, 'image_failed', res.status === 429 ? 'O gerador de imagens grátis está ocupado. Tente de novo em um minuto.' : 'Não foi possível gerar a imagem agora.');
-      bytes = new Uint8Array(await res.arrayBuffer());
+      return new Uint8Array(await res.arrayBuffer());
     } catch (e) {
       if (e instanceof AppError) throw e;
       throw new AppError(504, 'image_timeout', 'O gerador de imagens demorou demais. Tente de novo.');
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async render(
+    prompt: string,
+    bucket: 'media' | 'chat',
+    prefix: string,
+    width: number,
+    height: number,
+    reference: { bytes: Uint8Array; mime: string } | null = null,
+  ): Promise<string> {
+    const bytes = (await this.gemini(prompt, width, height, reference)) ?? (await this.pollinations(prompt, width, height));
     const mime = imageMime(bytes);
-    if (!mime || bytes.byteLength < 2000 || bytes.byteLength > 8_000_000) throw new AppError(502, 'image_failed', 'O gerador devolveu uma imagem inválida. Tente de novo.');
-    const path = `${prefix}-${Date.now().toString(36)}-${seed.toString(36)}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}`;
+    if (!mime || bytes.byteLength < 2000 || bytes.byteLength > 12_000_000) throw new AppError(502, 'image_failed', 'O gerador devolveu uma imagem inválida. Tente de novo.');
+    const tag = Math.floor(Math.random() * 1_000_000_000).toString(36);
+    const path = `${prefix}-${Date.now().toString(36)}-${tag}.${mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg'}`;
     const { error } = await this.db.storage.from(bucket).upload(path, bytes, { contentType: mime, upsert: false });
     if (error) throw new AppError(500, 'upload_failed', 'Falha ao salvar a imagem gerada.');
     return path;

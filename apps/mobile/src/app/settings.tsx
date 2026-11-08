@@ -1,3 +1,4 @@
+import { isPremiumActive } from '@vibuzz/shared';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as Linking from 'expo-linking';
@@ -167,7 +168,7 @@ export default function Settings() {
         </Section>
 
         <Section title="Seu plano">
-          <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={account?.plan === 'premium' ? 'Ativo' : account?.premium_waitlist ? 'Você está na lista de espera' : 'Compare os planos'} onPress={() => router.push('/premium')} />
+          <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={isPremiumActive(account) ? `Ativo${account?.premium_until ? ` até ${new Date(account.premium_until).toLocaleDateString('pt-BR')}` : ''}` : 'Mais mensagens, memória e fotos'} onPress={() => router.push('/premium')} />
           <ListItem icon="trophy-outline" title="Conquistas" onPress={() => router.push('/achievements')} />
         </Section>
 

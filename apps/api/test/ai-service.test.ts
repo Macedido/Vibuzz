@@ -113,3 +113,86 @@ describe('tier selection and creativity', () => {
     expect(creativityToTemperature(5)).toBe(1.05);
   });
 });
+
+describe('AiService hedging', () => {
+  const sleep = (ms: number, signal?: AbortSignal) =>
+    new Promise<void>((resolve, reject) => {
+      const t = setTimeout(resolve, ms);
+      signal?.addEventListener('abort', () => (clearTimeout(t), reject(new Error('aborted'))), { once: true });
+    });
+  function slow(name: string, delay: number, text: string, seen: { aborted?: boolean } = {}): ChatProvider {
+    return {
+      name,
+      async *stream(_m: string, r: ChatRequest) {
+        try {
+          await sleep(delay, r.signal);
+        } catch (e) {
+          seen.aborted = true;
+          throw e;
+        }
+        yield { type: 'text', text };
+        yield { type: 'end', stopReason: 'stop', inputTokens: 1, outputTokens: 1 };
+      },
+    };
+  }
+
+  it('starts the next model when the first is slow and keeps the faster answer', async () => {
+    const seen: { aborted?: boolean } = {};
+    const ai = new AiService(
+      new Map([
+        ['a', slow('a', 500, 'lento', seen)],
+        ['b', slow('b', 10, 'rápido')],
+      ]),
+      { advanced: [{ provider: 'a', model: 'm1' }, { provider: 'b', model: 'm2' }] },
+      () => {},
+    );
+    const t0 = Date.now();
+    const res = await ai.stream('advanced', { ...req, hedgeMs: 40 }, meta, () => {});
+    expect(res).toMatchObject({ text: 'rápido', provider: 'b' });
+    expect(Date.now() - t0).toBeLessThan(400);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(seen.aborted).toBe(true);
+  });
+
+  it('keeps the first model when it answers before the hedge timer', async () => {
+    const b = vi.fn(() => ok('b'));
+    const ai = new AiService(
+      new Map([
+        ['a', slow('a', 5, 'primeiro')],
+        ['b', fake('b', b)],
+      ]),
+      { advanced: [{ provider: 'a', model: 'm1' }, { provider: 'b', model: 'm2' }] },
+      () => {},
+    );
+    const res = await ai.stream('advanced', { ...req, hedgeMs: 200 }, meta, () => {});
+    expect(res.text).toBe('primeiro');
+    expect(b).not.toHaveBeenCalled();
+  });
+
+  it('moves on immediately when a model fails, without waiting for the timer', async () => {
+    const ai = new AiService(
+      new Map([
+        ['a', fake('a', () => fail(true))],
+        ['b', slow('b', 10, 'ok')],
+      ]),
+      { advanced: [{ provider: 'a', model: 'm1' }, { provider: 'b', model: 'm2' }] },
+      () => {},
+    );
+    const t0 = Date.now();
+    const res = await ai.stream('advanced', { ...req, hedgeMs: 5_000 }, meta, () => {});
+    expect(res.text).toBe('ok');
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('throws the last error when every model fails', async () => {
+    const ai = new AiService(
+      new Map([
+        ['a', fake('a', () => fail(true))],
+        ['b', fake('b', () => fail(false))],
+      ]),
+      { advanced: [{ provider: 'a', model: 'm1' }, { provider: 'b', model: 'm2' }] },
+      () => {},
+    );
+    await expect(ai.stream('advanced', { ...req, hedgeMs: 10 }, meta, () => {})).rejects.toThrow('nope');
+  });
+});

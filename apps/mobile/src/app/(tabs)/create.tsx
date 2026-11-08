@@ -1,4 +1,3 @@
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons, Screen, TopBar, type IconName } from '@/components/ui';
@@ -7,7 +6,7 @@ import { colors, radius, space, type } from '@/lib/theme';
 function Option({ icon, title, text, onPress, highlight }: { icon: IconName; title: string; text: string; onPress: () => void; highlight?: boolean }) {
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.option, highlight && { borderColor: colors.accent + '66' }, pressed && { opacity: 0.85 }]}>
-      {highlight ? <LinearGradient colors={['rgba(42,125,255,0.16)', 'rgba(70,213,255,0.06)']} style={StyleSheet.absoluteFill} /> : null}
+      {highlight ? <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.accentSoft }]} /> : null}
       <View style={[styles.icon, highlight && { backgroundColor: colors.accent }]}>
         <Ionicons name={icon} size={22} color={highlight ? colors.accentInk : colors.accent} />
       </View>

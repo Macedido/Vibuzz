@@ -1,13 +1,14 @@
+import { isPremiumActive } from '@vibuzz/shared';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { CharacterRow } from '@/components/character-card';
+import { PremiumBadge } from '@/components/premium-badge';
 import { Avatar, Button, Card, EmptyState, IconButton, Ionicons, ListItem, Loading, Row, Screen, Segmented, TopBar } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { brandGradient, colors, radius, space, type } from '@/lib/theme';
+import { colors, radius, space, type } from '@/lib/theme';
 import { compact, type CharacterCard } from '@/lib/types';
 
 function Stat({ value, label }: { value: number; label: string }) {
@@ -49,6 +50,7 @@ export default function Profile() {
   );
 
   if (!profile) return <Loading />;
+  const premium = isPremiumActive(account);
   const list = tab === 'created' ? q.data?.mine : tab === 'favorites' ? q.data?.favorites : [];
 
   return (
@@ -73,6 +75,7 @@ export default function Profile() {
               <Text style={type.h1} numberOfLines={1}>
                 {profile.display_name}
               </Text>
+              <PremiumBadge until={profile.premium_until} size="md" />
               <Text style={type.small}>@{profile.username}</Text>
             </View>
           </Row>
@@ -97,13 +100,13 @@ export default function Profile() {
               <Ionicons name="chevron-forward" size={16} color={colors.faint} />
             </Pressable>
             <Pressable onPress={() => router.push('/premium')} style={({ pressed }) => [{ flex: 1 }, pressed && { opacity: 0.85 }]}>
-              <LinearGradient colors={[...brandGradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.tile, { borderWidth: 0 }]}>
+              <View style={[styles.tile, { borderWidth: 0, backgroundColor: colors.accent }]}>
                 <Ionicons name="star" size={20} color="#fff" />
                 <View style={{ flex: 1 }}>
-                  <Text style={[type.h3, { color: '#fff' }]}>{account?.plan === 'premium' ? 'Premium ativo' : 'Premium'}</Text>
-                  <Text style={[type.small, { color: '#ffffffcc' }]}>{account?.plan === 'premium' ? 'Obrigado!' : account?.premium_waitlist ? 'Na lista de espera' : 'Ver planos'}</Text>
+                  <Text style={[type.h3, { color: '#fff' }]}>{premium ? 'Premium ativo' : 'Premium'}</Text>
+                  <Text style={[type.small, { color: '#ffffffcc' }]}>{premium ? 'Ver ou somar tempo' : 'Ver planos'}</Text>
                 </View>
-              </LinearGradient>
+              </View>
             </Pressable>
           </Row>
           <View style={{ marginTop: space.xl }}>

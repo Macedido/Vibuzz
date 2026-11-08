@@ -1,5 +1,7 @@
 import {
   characterUpsertSchema,
+  checkoutSchema,
+  confirmPaymentSchema,
   commentSchema,
   createConversationSchema,
   creatorGenerateSchema,
@@ -23,6 +25,8 @@ import { parse, sse, type Emit } from './lib/http';
 import type { Logger } from './lib/log';
 import type { RateLimiter } from './lib/rate-limit';
 import { assertOwnedPath } from './lib/storage';
+import { BillingService } from './modules/billing/service';
+import { dailyMessageLimit } from './modules/conversations/service';
 import type { Services } from './services';
 
 const id = z.string().uuid();
@@ -294,9 +298,49 @@ export function registerRoutes(app: Hono<AppEnv>, s: Services, log: Logger, limi
   });
 
   app.get('/v1/me/usage', async (c) => {
-    const { data } = await s.db.rpc('usage_today', { p_user: uid(c) });
+    const [{ data }, user] = await Promise.all([s.db.rpc('usage_today', { p_user: uid(c) }), s.repo.user(uid(c))]);
     const row = (data as { chat_messages: number; cost_usd: number }[] | null)?.[0];
-    return c.json({ messagesToday: Number(row?.chat_messages ?? 0), dailyLimit: s.env.DAILY_MESSAGE_LIMIT });
+    return c.json({ messagesToday: Number(row?.chat_messages ?? 0), dailyLimit: dailyMessageLimit(s.env, user.isPremium), premium: user.isPremium });
+  });
+
+  /* -------------------------------- billing ------------------------------- */
+
+  app.get('/v1/billing', (c) => c.json(s.billing.info()));
+
+  app.post('/v1/billing/checkout', async (c) => {
+    limit(c, 'checkout', 10);
+    const { plan } = parse(checkoutSchema, await body(c));
+    return c.json(await s.billing.checkout(uid(c), plan));
+  });
+
+  /** Called by the app when Mercado Pago sends the buyer back (does not wait for the webhook). */
+  app.post('/v1/billing/confirm', async (c) => {
+    limit(c, 'billing_confirm', 20);
+    const { paymentId } = parse(confirmPaymentSchema, await body(c));
+    return c.json(await s.billing.process(paymentId, uid(c)));
+  });
+
+  /** Mercado Pago notifications. Always re-reads the payment from Mercado Pago before granting anything. */
+  app.post('/v1/billing/webhook', async (c) => {
+    const raw = await c.req.text();
+    let payload: unknown = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch {
+      payload = null;
+    }
+    const id = BillingService.paymentIdFrom(c.req.query(), payload);
+    if (!id) return c.json({ ok: true, ignored: true });
+    if (!(await s.billing.verifyWebhook({ signature: c.req.header('x-signature'), requestId: c.req.header('x-request-id') }, id))) {
+      return c.json({ ok: false }, 401);
+    }
+    try {
+      const out = await s.billing.process(id);
+      return c.json({ ok: true, status: out.status });
+    } catch (e) {
+      log.warn({ err: String((e as Error).message), id }, 'billing webhook failed');
+      return c.json({ ok: false }, 500);
+    }
   });
 
   /** Permanently deletes the account and every piece of data (LGPD/GDPR). */

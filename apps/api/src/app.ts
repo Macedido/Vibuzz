@@ -10,7 +10,7 @@ import type { Services } from './services';
 
 export type AppEnv = { Variables: { userId: string } };
 
-const PUBLIC_PATHS = ['/health', '/v1/status', '/v1/internal/tick'];
+const PUBLIC_PATHS = ['/health', '/v1/status', '/v1/internal/tick', '/v1/billing', '/v1/billing/webhook'];
 
 /**
  * HTTP layer built on Hono (Web-standard Request/Response), so the exact same

@@ -1,11 +1,10 @@
 import { METERS, type MeterKey } from '@vibuzz/shared';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 import { Avatar, EmptyState, ErrorState, Loading, Row, Screen } from '@/components/ui';
 import { unwrap, useQuery } from '@/lib/hooks';
 import { supabase } from '@/lib/supabase';
-import { brandGradient, colors, radius, space, type } from '@/lib/theme';
+import { colors, radius, space, type } from '@/lib/theme';
 import { timeAgo } from '@/lib/types';
 
 interface Rel {
@@ -19,7 +18,6 @@ interface Rel {
   events: { kind: string; state: string; change: string; created_at: string }[];
 }
 
-const RIVAL: [string, string] = ['#FF7A59', '#FF4D8D'];
 
 function Meter({ label, value, rival }: { label: string; value: number; rival?: boolean }) {
   return (
@@ -29,7 +27,7 @@ function Meter({ label, value, rival }: { label: string; value: number; rival?: 
         <Text style={[type.small, { color: colors.text, fontWeight: '700' }]}>{Math.round(value)}</Text>
       </Row>
       <View style={styles.track}>
-        <LinearGradient colors={rival ? RIVAL : [...brandGradient]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={[styles.fill, { width: `${Math.max(3, Math.min(100, value))}%` }]} />
+<View style={[styles.fill, { width: `${Math.max(3, Math.min(100, value))}%`, backgroundColor: rival ? colors.danger : colors.accent }]} />
       </View>
     </View>
   );

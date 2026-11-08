@@ -73,6 +73,7 @@ export class IntelligenceEngine {
 
   async runTurn(input: TurnInput): Promise<MessageRow[]> {
     const { conversation: conv } = input;
+    const plan = PLAN_LIMITS[input.viewer.isPremium ? 'premium' : 'free'];
     const character = await this.repo.character(conv.character_id);
     const isGroup = character.kind === 'group';
     const cast: CharacterWithSheet[] = isGroup ? await this.repo.groupCast(character.id) : [];
@@ -124,7 +125,7 @@ export class IntelligenceEngine {
       const holderId = isGroup ? sp.id : null;
       const visiblePath = isGroup ? path.filter((m) => !m.audience_character_id || m.audience_character_id === sp.id) : path;
       const pathIds = visiblePath.map((m) => m.id);
-      const ctx = await this.memory.retrieve({ conversationId: conv.id, userId: conv.user_id, holderId, pathIds, query, names, limit: PLAN_LIMITS[input.viewer.isPremium ? 'premium' : 'free'].memoryItems });
+      const ctx = await this.memory.retrieve({ conversationId: conv.id, userId: conv.user_id, holderId, pathIds, query, names, limit: plan.memoryItems });
 
       const castInfo: CastMember[] = cast.map((c) => ({ id: c.id, name: c.name, sheet: c.sheet }));
       const imageNotes = visiblePath
@@ -213,7 +214,15 @@ export class IntelligenceEngine {
       try {
         result = await this.ai.stream(
           tier,
-          { system, messages, maxTokens: isGroup ? 700 : 1200, temperature, effort: tier === 'specialized' ? 'medium' : 'low', signal: input.signal },
+          {
+            system,
+            messages,
+            maxTokens: Math.round(plan.replyTokens * (isGroup ? 0.6 : 1)),
+            temperature,
+            effort: tier === 'specialized' ? 'medium' : 'low',
+            hedgeMs: plan.hedgeMs,
+            signal: input.signal,
+          },
           { userId: conv.user_id, conversationId: conv.id, kind: input.continueMessageId ? 'chat_continue' : 'chat' },
           (t) => {
             const chunk = !text && sep ? sep + t : t;
@@ -249,7 +258,7 @@ export class IntelligenceEngine {
         'save reply',
       ) as MessageRow;
       input.emit({ type: 'message_done', message: toApiMessage(saved) });
-      const withPhoto = photo && !input.continueMessageId ? await this.attachPhoto(saved, photo, member?.sheet ?? character.sheet, conv, input) : saved;
+      const withPhoto = photo && !input.continueMessageId ? await this.attachPhoto(saved, photo, member?.sheet ?? character.sheet, conv, input, member?.avatar_path ?? character.avatar_path) : saved;
       created.push(withPhoto);
       if (!input.continueMessageId) {
         path = [...path, saved];
@@ -273,12 +282,26 @@ export class IntelligenceEngine {
   }
 
   /** Turns a "[foto: ...]" line into a real image on the message (within the daily limit). */
-  private async attachPhoto(saved: MessageRow, description: string, sheet: CharacterWithSheet['sheet'], conv: ConversationRow, input: TurnInput): Promise<MessageRow> {
+  private async attachPhoto(
+    saved: MessageRow,
+    description: string,
+    sheet: CharacterWithSheet['sheet'],
+    conv: ConversationRow,
+    input: TurnInput,
+    referencePath?: string | null,
+  ): Promise<MessageRow> {
     if (!this.images) return saved;
     try {
       if ((await this.images.photosToday(conv.user_id)) >= this.photosPerDay(Boolean(input.viewer.isPremium))) return saved;
       input.emit({ type: 'image', messageId: saved.id, status: 'pending' });
-      const path = await this.images.generateChatPhoto({ userId: conv.user_id, conversationId: conv.id, description, sheet });
+      const path = await this.images.generateChatPhoto({
+        userId: conv.user_id,
+        conversationId: conv.id,
+        description,
+        sheet,
+        size: PLAN_LIMITS[input.viewer.isPremium ? 'premium' : 'free'].photoSize,
+        referencePath,
+      });
       const updated = must(
         await this.db.from('messages').update({ image_paths: [...(saved.image_paths ?? []), path] }).eq('id', saved.id).select(MESSAGE_COLUMNS).single(),
         'attach photo',
@@ -342,11 +365,24 @@ Output JSON: {"speakers":[{"name": member name, "intent": short direction in Por
 }
 
 /** Removes a leading "Name:" the model may add in group mode, and trims. */
+/** A closing line that only hands the turn to the user ("O que você faz?"), which the prompt forbids. */
+const TURN_PROMPT =
+  /^[\s*_(\[]*(?:e\s+agora[,.!?…]*\s*)?(?:o\s+que\s+(?:voc[êe]|vc|tu)\s+(?:faz|far[áa]|vai\s+fazer|decide|escolhe)|agora\s+[ée]\s+(?:a\s+)?(?:sua|tua)\s+(?:vez|chance|escolha|decis[ãa]o)|a\s+(?:escolha|decis[ãa]o)\s+[ée]\s+(?:sua|tua)|qual\s+(?:ser[áa]\s+)?(?:o\s+)?seu\s+pr[óo]ximo\s+(?:passo|movimento)|what\s+(?:do|will)\s+you\s+do|it'?s\s+your\s+(?:turn|move|choice))\b[^\n]{0,140}$/i;
+
 export function cleanReply(text: string, speakerName: string): string {
   let t = text.trim();
   if (speakerName) {
     const re = new RegExp(`^\\[?${speakerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]?\\s*:\\s*`, 'i');
     t = t.replace(re, '');
   }
+  // Drop a trailing "your turn" line (only when there is a story before it).
+  const lines = t.split('\n');
+  while (lines.length > 1 && TURN_PROMPT.test(lines[lines.length - 1].trim())) {
+    lines.pop();
+    while (lines.length > 1 && !lines[lines.length - 1].trim()) lines.pop();
+  }
+  t = lines.join('\n');
+  // Same idea when it is the last sentence of the last paragraph.
+  t = t.replace(/([.!?…*"”])\s+((?:e\s+agora[,.!?…]*\s*)?(?:o\s+que\s+(?:voc[êe]|vc|tu)\s+(?:faz|far[áa]|vai\s+fazer)|agora\s+[ée]\s+(?:a\s+)?(?:sua|tua)\s+(?:vez|chance))[^.!?\n]{0,100}[?!.…]*)\s*$/i, '$1');
   return t.trim();
 }

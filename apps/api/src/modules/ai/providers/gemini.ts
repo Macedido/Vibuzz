@@ -40,10 +40,10 @@ export class GeminiProvider implements ChatProvider {
     private apiKey: string,
     private bases: string[] = geminiBasesFor(apiKey),
     private fetchImpl: typeof fetch = fetch,
-    private firstByteTimeoutMs = 45_000,
+    private firstByteTimeoutMs = 20_000,
   ) {}
 
-  private body(req: ChatRequest) {
+  private body(model: string, req: ChatRequest) {
     const system = [req.system.stable, req.system.dynamic, req.json ? 'Respond with a single valid JSON object only.' : ''].filter(Boolean).join('\n\n');
     const contents = req.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: toParts(m.content) }));
     if (!contents.length || contents[0].role !== 'user') contents.unshift({ role: 'user', parts: [{ text: '[A conversa começa.]' }] });
@@ -55,8 +55,9 @@ export class GeminiProvider implements ChatProvider {
         maxOutputTokens: req.maxTokens,
         ...(req.temperature != null ? { temperature: req.temperature } : {}),
         ...(req.json ? { responseMimeType: 'application/json' } : {}),
-        // Thinking adds latency to chat; a small budget keeps quality for JSON tasks.
-        thinkingConfig: { thinkingBudget: req.json ? 512 : 0 },
+        // Thinking adds seconds before the first token; roleplay and our JSON tasks do fine without it.
+        // Gemini 3 models cannot switch thinking off; "low" keeps them quick.
+        thinkingConfig: model.startsWith('gemini-3') ? { thinkingLevel: 'low' } : { thinkingBudget: 0 },
       },
     };
   }
@@ -71,7 +72,7 @@ export class GeminiProvider implements ChatProvider {
       return await this.fetchImpl(`${base}/${id}:streamGenerateContent?alt=sse`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
-        body: JSON.stringify(this.body(req)),
+        body: JSON.stringify(this.body(model, req)),
         signal: ctrl.signal,
       });
     } catch (e) {

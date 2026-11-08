@@ -158,7 +158,9 @@ describe('free AI support', async () => {
 
     const gem = AiService.fromEnv(loadEnv({ ...base, GEMINI_API_KEY: 'k' }), () => {});
     expect(gem.chains.advanced[0]).toEqual({ provider: 'gemini', model: 'gemini-flash-latest' });
-    expect(gem.chains.advanced[1].provider).toBe('ovh');
+    expect(gem.chains.advanced[1]).toEqual({ provider: 'gemini', model: 'gemini-3-flash-preview' });
+    expect(gem.chains.advanced[2]).toEqual({ provider: 'gemini', model: 'gemini-flash-lite-latest' });
+    expect(gem.chains.advanced[3].provider).toBe('ovh');
     expect(gem.hasPaidChat).toBe(true);
 
     const off = AiService.fromEnv(loadEnv({ ...base, FREE_AI: 'false' }), () => {});
@@ -201,5 +203,72 @@ describe('portraits (free image model)', () => {
     const fetchFn = (async () => new Response('{"error":"queue full"}', { status: 200 })) as unknown as typeof fetch;
     const svc = new ImageService({ complete: async () => ({ text: 'x' }) } as never, {} as never, { baseUrl: 'https://img.test', fetch: fetchFn });
     await expect(svc.generatePortrait(characterSheetSchema.parse({ name: 'X' }), 'anime', 'u')).rejects.toThrow(/inválida/);
+  });
+});
+
+describe('cleanReply turn prompts', () => {
+  it('removes a closing "your turn" line but keeps the story', async () => {
+    const { cleanReply } = await import('../src/modules/intelligence/engine');
+    expect(cleanReply('*Kael cruza os braços.* "Fala logo."\n\nAgora é sua chance. O que vai fazer em seguida?', 'Kael')).toBe('*Kael cruza os braços.* "Fala logo."');
+    expect(cleanReply('*A porta range.*\n\n**O que você faz?**', 'Narrador')).toBe('*A porta range.*');
+    expect(cleanReply('*A chuva aperta.* A escolha é sua.', 'X')).toBe('*A chuva aperta.* A escolha é sua.');
+    expect(cleanReply('Ela sorri. E agora, o que você vai fazer?', 'Ela')).toBe('Ela sorri.');
+    expect(cleanReply('O que você faz?', 'X')).toBe('O que você faz?');
+    expect(cleanReply('"O que você faz aqui tão tarde?" pergunta Lyra, desconfiada.', 'Lyra')).toBe('"O que você faz aqui tão tarde?" pergunta Lyra, desconfiada.');
+  });
+});
+
+describe('image generation', () => {
+  const png = () => {
+    const b = new Uint8Array(4000);
+    b.set([0x89, 0x50, 0x4e, 0x47]);
+    return b;
+  };
+  const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64');
+  function storage() {
+    const uploads: string[] = [];
+    const db = {
+      storage: {
+        from: () => ({
+          upload: async (path: string) => (uploads.push(path), { error: null }),
+          download: async () => ({ data: new Blob([png()]) }),
+        }),
+      },
+    } as never;
+    return { db, uploads };
+  }
+
+  it('uses Gemini first, with the avatar as reference, and skips unknown models', async () => {
+    const { ImageService } = await import('../src/modules/images/service');
+    const { db, uploads } = storage();
+    const calls: { url: string; body: string }[] = [];
+    const fetchMock = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: String(init?.body ?? '') });
+      if (url.includes('gemini-2.5-flash-image')) return new Response('not found', { status: 404 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ok' }, { inlineData: { mimeType: 'image/png', data: b64(png()) } }] } }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const images = new ImageService({} as never, db, { baseUrl: 'https://poll.test', fetch: fetchMock, gemini: { apiKey: 'AQ.x', bases: ['https://vertex.test/models'] } });
+    const path = await images.generateChatPhoto({ userId: 'u', conversationId: 'c', description: 'a selfie at the beach', sheet: { name: 'Lyra' } as never, referencePath: 'u/characters/a.png' });
+    expect(path).toMatch(/^u\/c\/foto-.*\.png$/);
+    expect(uploads).toHaveLength(1);
+    expect(calls.map((c) => c.url)).toEqual(['https://vertex.test/models/gemini-2.5-flash-image:generateContent', 'https://vertex.test/models/gemini-3.1-flash-image-preview:generateContent']);
+    const body = JSON.parse(calls[1].body);
+    expect(body.contents[0].parts[0].inlineData.mimeType).toBe('image/png');
+    expect(body.generationConfig.imageConfig.aspectRatio).toBe('4:5');
+  });
+
+  it('falls back to the free generator when Gemini is rate limited', async () => {
+    const { ImageService } = await import('../src/modules/images/service');
+    const { db } = storage();
+    const urls: string[] = [];
+    const fetchMock = (async (url: string) => {
+      urls.push(url);
+      if (url.includes('vertex')) return new Response('quota', { status: 429 });
+      return new Response(png(), { status: 200 });
+    }) as unknown as typeof fetch;
+    const images = new ImageService({} as never, db, { baseUrl: 'https://poll.test', fetch: fetchMock, gemini: { apiKey: 'AQ.x', bases: ['https://vertex.test/models'] } });
+    await images.generateChatPhoto({ userId: 'u', conversationId: 'c', description: 'a cat', sheet: { name: 'Lyra' } as never });
+    expect(urls).toHaveLength(2);
+    expect(urls[1]).toContain('https://poll.test/prompt/');
   });
 });

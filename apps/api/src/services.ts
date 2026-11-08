@@ -1,3 +1,5 @@
+import { geminiBasesFor } from './modules/ai/providers/gemini';
+import { BillingService } from './modules/billing/service';
 import { PLAN_LIMITS } from '@vibuzz/shared';
 import type { Env } from './config';
 import { createAdminClient, type Db } from './lib/db';
@@ -35,6 +37,7 @@ export interface Services {
   images: ImageService;
   push: PushService;
   life: LifeService;
+  billing: BillingService;
   worker: JobWorker;
   flushUsage: () => Promise<void>;
   maintenance: () => Promise<void>;
@@ -94,11 +97,18 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
   const ai = AiService.fromEnv(env, usage.sink);
   const repo = new Repo(db, { immediateJobs: hooks.serverless });
   const storage = new StorageService(db);
-  const moderation = new ModerationService(ai, db, { moderatePrivateChat: ai.hasPaidChat || env.MODERATE_PRIVATE_CHAT === true });
+  // Private chat uses the local screen + platform rules in the prompt; a classifier call before
+  // every reply doubles the wait. Public content (sheets, profiles, comments, images) is always classified.
+  const moderation = new ModerationService(ai, db, { moderatePrivateChat: env.MODERATE_PRIVATE_CHAT === true });
   const vision = new VisionService(ai);
   const memory = new MemoryService(repo, ai);
   const scene = new SceneService(repo, ai);
-  const images = new ImageService(ai, db, { baseUrl: env.POLLINATIONS_IMAGE_URL });
+  const geminiKey = env.GEMINI_API_KEY?.trim();
+  const images = new ImageService(ai, db, {
+    baseUrl: env.POLLINATIONS_IMAGE_URL,
+    gemini: geminiKey ? { apiKey: geminiKey, bases: geminiBasesFor(geminiKey, env.GEMINI_NATIVE_BASE) } : undefined,
+    log: (msg, extra) => log.warn((extra ?? {}) as Record<string, unknown>, msg),
+  });
   const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages, env.IMAGE_GEN === false ? undefined : images, (premium) =>
     PLAN_LIMITS[premium ? 'premium' : 'free'].imagesPerDay,
   );
@@ -107,6 +117,13 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
   const conversations = new ConversationService(env, repo, engine, memory, moderation, vision, storage);
   const characters = new CharacterService(repo, moderation, storage, ai);
   const creator = new CreatorService(ai, vision, storage);
+  const billing = new BillingService(db, {
+    accessToken: env.MERCADOPAGO_ACCESS_TOKEN?.trim() || undefined,
+    webhookSecret: env.MERCADOPAGO_WEBHOOK_SECRET?.trim() || undefined,
+    prices: { month: env.PREMIUM_PRICE_MONTH, year: env.PREMIUM_PRICE_YEAR },
+    appUrl: env.APP_URL,
+    apiUrl: env.API_PUBLIC_URL ?? `${env.SUPABASE_URL.replace(/\/$/, '')}/functions/v1/vibuzz-api`,
+  });
 
   const maintenance = async () => {
     const purged = await conversations.maintenancePurge();
@@ -150,6 +167,7 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
     images,
     push,
     life,
+    billing,
     worker,
     flushUsage: usage.flush,
     maintenance: () => worker.maybeMaintain(),

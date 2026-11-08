@@ -376,6 +376,23 @@ console.log('v2: Google sign-up, vida própria, coleções, conquistas, ranking,
   check('photo counted', (await one(`select photos_received from user_stats where user_id = $1`, [alice])).photos_received === 1);
   check('gallery lists conversation images', (await as(alice, () => all(`select * from conversation_gallery($1)`, [conv]))).length === 1);
   check('others cannot see the gallery', (await as(bob, () => all(`select * from conversation_gallery($1)`, [conv]))).length === 0);
+
+  console.log('Premium payments');
+  const until1 = (await one(`select apply_premium_payment($1, 'mercadopago', 'pay-1', 'month', 14.90) as u`, [alice])).u;
+  const acct = await one(`select plan, premium_until from users where id = $1`, [alice]);
+  check('payment makes the account premium for ~30 days', acct.plan === 'premium' && Math.round((new Date(acct.premium_until) - Date.now()) / 86400000) === 30);
+  const until2 = (await one(`select apply_premium_payment($1, 'mercadopago', 'pay-1', 'month', 14.90) as u`, [alice])).u;
+  check('the same payment is applied only once', new Date(until2).getTime() === new Date(until1).getTime());
+  await db.query(`select apply_premium_payment($1, 'mercadopago', 'pay-2', 'year', 149)`, [alice]);
+  check('a second payment extends the end date', Math.round((new Date((await one(`select premium_until from users where id = $1`, [alice])).premium_until) - Date.now()) / 86400000) === 395);
+  check('premium badge is public', (await as(bob, () => all(`select premium_until from user_profiles where id = $1 and premium_until > now()`, [alice]))).length === 1);
+  check('premium notification sent', (await all(`select 1 from notifications where user_id = $1 and payload->>'title' = 'Premium ativado!'`, [alice])).length === 2);
+  check('owner sees own payments', (await as(alice, () => all(`select * from payments`))).length === 2);
+  check('others cannot see payments', (await as(bob, () => all(`select * from payments`))).length === 0);
+  await as(alice, async () => {
+    await expectError('client cannot grant premium', () => db.query(`select apply_premium_payment($1, 'x', 'y', 'month', 0)`, [alice]), 'permission denied');
+    await expectError('client cannot edit the badge', () => db.query(`update user_profiles set premium_until = now() + interval '9 years' where id = $1`, [alice]), 'permission denied');
+  });
 }
 
 console.log('Cascade delete account');

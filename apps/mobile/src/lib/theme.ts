@@ -32,14 +32,24 @@ export const brandGradient = ['#1340FF', '#2A8CFF', '#4FDCFF'] as const;
 export const radius = { sm: 8, md: 12, lg: 16, xl: 22, pill: 999 } as const;
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 
-const display = Platform.select({ ios: 'System', android: 'sans-serif-condensed', default: 'system-ui' });
+/**
+ * Unbounded (wide, chunky display face) gives titles and character names a voice of
+ * their own; body text stays on the system UI font for reading comfort.
+ */
+export const fonts = {
+  display: 'Unbounded_800ExtraBold',
+  displaySemi: 'Unbounded_600SemiBold',
+} as const;
+
+const ui = Platform.select({ ios: 'System', android: undefined, default: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' });
 
 export const type = {
-  hero: { fontSize: 34, fontWeight: '800' as const, letterSpacing: -1.2, color: colors.text, fontFamily: display },
-  h1: { fontSize: 26, fontWeight: '800' as const, letterSpacing: -0.8, color: colors.text, fontFamily: display },
-  h2: { fontSize: 20, fontWeight: '700' as const, letterSpacing: -0.4, color: colors.text },
-  h3: { fontSize: 16, fontWeight: '700' as const, color: colors.text },
-  body: { fontSize: 15, lineHeight: 22, color: colors.textSoft },
-  small: { fontSize: 13, lineHeight: 18, color: colors.muted },
-  tiny: { fontSize: 11, fontWeight: '600' as const, letterSpacing: 0.6, color: colors.muted, textTransform: 'uppercase' as const },
+  hero: { fontSize: 32, lineHeight: 38, letterSpacing: -0.6, color: colors.text, fontFamily: fonts.display },
+  h1: { fontSize: 22, lineHeight: 28, letterSpacing: -0.3, color: colors.text, fontFamily: fonts.displaySemi },
+  h2: { fontSize: 19, fontWeight: '700' as const, letterSpacing: -0.3, color: colors.text, fontFamily: ui },
+  h3: { fontSize: 16, fontWeight: '700' as const, color: colors.text, fontFamily: ui },
+  body: { fontSize: 15, lineHeight: 22, color: colors.textSoft, fontFamily: ui },
+  small: { fontSize: 13, lineHeight: 18, color: colors.muted, fontFamily: ui },
+  /** Section labels: plain sentence case, no tracking. */
+  tiny: { fontSize: 12, fontWeight: '600' as const, color: colors.muted, fontFamily: ui },
 };

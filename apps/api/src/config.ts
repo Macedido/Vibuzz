@@ -52,7 +52,19 @@ const envSchema = z.object({
   /** JSON: {"provider:model": {"input": usdPerMTok, "output": usdPerMTok}} */
   MODEL_PRICING: z.string().optional(),
 
-  DAILY_MESSAGE_LIMIT: z.coerce.number().default(400),
+  /** Mercado Pago (Pix, cartão, boleto). Without it the Premium page shows a waitlist. */
+  MERCADOPAGO_ACCESS_TOKEN: z.string().optional(),
+  /** Optional: validates the x-signature header of webhooks (Mercado Pago → Webhooks → secret). */
+  MERCADOPAGO_WEBHOOK_SECRET: z.string().optional(),
+  PREMIUM_PRICE_MONTH: z.coerce.number().positive().default(14.9),
+  PREMIUM_PRICE_YEAR: z.coerce.number().positive().default(149),
+  /** Where the web app lives (payment return pages). */
+  APP_URL: z.string().url().default('https://macedido.github.io/Vibuzz'),
+  /** Public URL of this API (payment webhooks). Default: the Supabase Edge Function. */
+  API_PUBLIC_URL: z.string().url().optional(),
+
+  /** Free plan; Premium uses PLAN_LIMITS. */
+  DAILY_MESSAGE_LIMIT: z.coerce.number().default(200),
   DAILY_COST_LIMIT_USD: z.coerce.number().default(1.5),
   RATE_LIMIT_PER_MINUTE: z.coerce.number().default(60),
 

@@ -2,7 +2,8 @@ import { DarkTheme, Stack, ThemeProvider, useRouter, useSegments } from 'expo-ro
 import * as Linking from 'expo-linking';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { Unbounded_600SemiBold, Unbounded_800ExtraBold, useFonts } from '@expo-google-fonts/unbounded';
+import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -120,9 +121,18 @@ function MissingConfig({ missing }: { missing: string[] }) {
 
 export default function RootLayout() {
   const missing = missingConfig();
+  // Titles use Unbounded; wait for it (max ~2 s on slow networks, then fall back) so nothing jumps.
+  const [fontsLoaded, fontError] = useFonts({ Unbounded_600SemiBold, Unbounded_800ExtraBold });
+  const [fontTimeout, setFontTimeout] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setFontTimeout(true), 2000);
+    return () => clearTimeout(t);
+  }, []);
   useEffect(() => {
     if (missing.length) SplashScreen.hideAsync().catch(() => {});
   }, [missing.length]);
+
+  if (!fontsLoaded && !fontError && !fontTimeout) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>

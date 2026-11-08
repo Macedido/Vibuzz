@@ -5,17 +5,18 @@ import { useRouter } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { mediaUrl } from '@/lib/supabase';
-import { colors, radius, space, type } from '@/lib/theme';
+import { colors, fonts, radius, space, type } from '@/lib/theme';
 import { compact, type CharacterCard } from '@/lib/types';
 
-/** Two-tone gradient picked from the name, so cards without art still look distinct. */
+/** One tone per name (base + a lighter tone-on-tone for the monogram), so cards without art still differ. */
 const PALETTES: [string, string][] = [
-  ['#3B2A6B', '#14121F'],
-  ['#1F4D5A', '#0F1418'],
-  ['#5A2443', '#170F15'],
-  ['#3E4A1C', '#11140C'],
-  ['#5B3A1A', '#18110B'],
-  ['#25356B', '#0E1120'],
+  ['#2B1E52', '#3D2C70'],
+  ['#123B47', '#1B5263'],
+  ['#4A1733', '#652447'],
+  ['#2E3814', '#41501E'],
+  ['#4A2C12', '#653D1B'],
+  ['#18275C', '#24387D'],
+  ['#3A1A12', '#55281C'],
 ];
 export function paletteFor(name: string): [string, string] {
   let h = 0;
@@ -23,15 +24,33 @@ export function paletteFor(name: string): [string, string] {
   return PALETTES[h % PALETTES.length];
 }
 
-/** Full-bleed art (or a generated fallback) used by every card. */
+/** Full-bleed art, or a cover made from the name: an oversized, cropped monogram in the display face. */
 export function CoverArt({ c, style, initialSize = 64 }: { c: Pick<CharacterCard, 'name' | 'avatar_path'>; style?: object; initialSize?: number }) {
   const src = mediaUrl(c.avatar_path);
   if (src) return <Image source={{ uri: src }} style={[StyleSheet.absoluteFill, style]} contentFit="cover" transition={200} />;
-  const [a, b] = paletteFor(c.name);
+  const [base, tone] = paletteFor(c.name);
+  const letter = (c.name.trim()[0] ?? '?').toUpperCase();
+  const small = initialSize < 40;
   return (
-    <LinearGradient colors={[a, b]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }, style]}>
-      <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: initialSize, fontWeight: '900', letterSpacing: -2 }}>{c.name.slice(0, 1).toUpperCase()}</Text>
-    </LinearGradient>
+    <View style={[StyleSheet.absoluteFill, { backgroundColor: base, overflow: 'hidden' }, small && { alignItems: 'center', justifyContent: 'center' }, style]}>
+      {small ? (
+        <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: initialSize, fontFamily: fonts.display }}>{letter}</Text>
+      ) : (
+        <Text
+          style={{
+            position: 'absolute',
+            right: -initialSize * 0.45,
+            top: -initialSize * 0.55,
+            color: tone,
+            fontSize: initialSize * 3,
+            lineHeight: initialSize * 3.2,
+            fontFamily: fonts.display,
+          }}
+        >
+          {letter}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -46,7 +65,7 @@ export function PortraitCard({ c, width = 160 }: { c: CharacterCard; width?: num
       accessibilityRole="button"
       accessibilityLabel={`${c.name}. ${c.tagline ?? ''}`}
     >
-      <CoverArt c={c} initialSize={width * 0.38} />
+      <CoverArt c={c} initialSize={width * 0.3} />
       <LinearGradient colors={['transparent', 'rgba(8,8,12,0.55)', 'rgba(8,8,12,0.96)']} locations={[0.35, 0.62, 1]} style={StyleSheet.absoluteFill} />
       <View style={styles.badges}>
         {c.kind === 'group' ? (
@@ -155,7 +174,7 @@ const styles = StyleSheet.create({
   badge: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: radius.pill, paddingHorizontal: 7, paddingVertical: 3 },
   badgeText: { fontSize: 10, fontWeight: '800' },
   text: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 10, paddingBottom: 10, gap: 3 },
-  name: { color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: -0.2 },
+  name: { color: '#fff', fontSize: 14, fontFamily: fonts.displaySemi, letterSpacing: -0.2 },
   tagline: { color: 'rgba(255,255,255,0.72)', fontSize: 12, lineHeight: 16 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 },
   metaText: { color: colors.textSoft, fontSize: 11, fontWeight: '600' },

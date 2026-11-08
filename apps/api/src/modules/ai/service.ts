@@ -7,7 +7,7 @@ import { AnthropicProvider } from './providers/anthropic';
 import { GeminiProvider, geminiBasesFor } from './providers/gemini';
 import { OpenAICompatibleProvider } from './providers/openai';
 import { hasSupabaseAi, SupabaseAiEmbeddings } from './providers/supabase-ai';
-import type { Capability, ChatProvider, ChatRequest, ChatResult, ModelRef, ModerationResult, Tier, Usage } from './types';
+import type { Capability, ChatProvider, ChatRequest, ChatResult, ModelRef, ModerationResult, StreamChunk, Tier, Usage } from './types';
 
 export const EMBEDDING_DIMENSIONS = 1536;
 
@@ -131,11 +131,11 @@ export class AiService {
       ),
       advanced: parseChain(
         env.MODEL_ADVANCED ??
-          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
+          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest,gemini:gemini-3-flash-preview,gemini:gemini-flash-lite-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
       ),
       specialized: parseChain(
         env.MODEL_SPECIALIZED ??
-          pick(has('anthropic') && 'anthropic:claude-opus-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
+          pick(has('anthropic') && 'anthropic:claude-opus-5-5', has('gemini') && 'gemini:gemini-flash-latest,gemini:gemini-3-flash-preview,gemini:gemini-flash-lite-latest', has('openai') && 'openai:gpt-5', free(FREE_ADVANCED)),
       ),
       vision: parseChain(
         env.MODEL_VISION ??
@@ -190,42 +190,115 @@ export class AiService {
 
   /**
    * Streams a chat completion. Falls back to the next model in the chain if a
-   * provider fails before producing any text.
+   * provider fails before producing any text, and "hedges": when the current model
+   * is slow to start, the next one runs in parallel and the first to answer wins.
    */
   async stream(cap: Tier | 'vision', req: ChatRequest, meta: UsageMeta, onText: (t: string) => void): Promise<ChatResult> {
     const chain = this.chains[cap];
     if (!chain.length) throw new NotConfiguredError('modelo de linguagem');
+    const hedgeMs = req.hedgeMs ?? (req.json ? 12_000 : 5_000);
+
+    type First = { a: Attempt; r: IteratorResult<StreamChunk> } | { a: Attempt; err: unknown };
+    interface Attempt {
+      ref: ModelRef;
+      ctrl: AbortController;
+      it: AsyncIterator<StreamChunk>;
+      started: number;
+      first: Promise<First>;
+      detach: () => void;
+    }
+    const launch = (ref: ModelRef): Attempt => {
+      const ctrl = new AbortController();
+      const onAbort = () => ctrl.abort();
+      req.signal?.addEventListener('abort', onAbort, { once: true });
+      const it = this.providers.get(ref.provider)!.stream(ref.model, { ...req, signal: ctrl.signal })[Symbol.asyncIterator]();
+      const a = { ref, ctrl, it, started: Date.now(), detach: () => req.signal?.removeEventListener('abort', onAbort) } as Attempt;
+      a.first = it.next().then(
+        (r): First => ({ a, r }),
+        (err): First => ({ a, err }),
+      );
+      return a;
+    };
+    const stop = (a: Attempt) => {
+      a.ctrl.abort();
+      a.detach();
+      void a.it.return?.(undefined)?.catch(() => {});
+    };
+
+    let next = 0;
     let lastError: unknown;
-    for (const ref of chain) {
-      const provider = this.providers.get(ref.provider)!;
-      const started = Date.now();
-      let emitted = false;
-      let text = '';
-      try {
-        for await (const chunk of provider.stream(ref.model, req)) {
-          if (chunk.type === 'text') {
-            emitted = true;
-            text += chunk.text;
-            onText(chunk.text);
-          } else {
-            const result: ChatResult = { ...chunk, text, provider: ref.provider, model: ref.model };
-            this.record(ref, cap, meta, result, Date.now() - started, true);
-            return result;
-          }
-        }
-        // Stream ended without an explicit end chunk (aborted).
-        const result: ChatResult = { text, provider: ref.provider, model: ref.model, stopReason: 'aborted', inputTokens: 0, outputTokens: 0 };
-        this.record(ref, cap, meta, result, Date.now() - started, true);
-        return result;
-      } catch (e) {
-        lastError = e;
-        this.record(ref, cap, meta, { inputTokens: 0, outputTokens: 0 }, Date.now() - started, false, String((e as Error).message));
-        if (req.signal?.aborted) throw e;
-        // Any failure before the first token moves on to the next model in the chain.
-        if (emitted) throw e;
+    const pending = new Set<Attempt>();
+    pending.add(launch(chain[next++]));
+
+    while (pending.size) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const canHedge = hedgeMs > 0 && next < chain.length;
+      const hedge = canHedge ? new Promise<'hedge'>((resolve) => (timer = setTimeout(() => resolve('hedge'), hedgeMs))) : null;
+      const winner = await Promise.race<First | 'hedge'>([...[...pending].map((a) => a.first), ...(hedge ? [hedge] : [])]);
+      if (timer) clearTimeout(timer);
+
+      if (winner === 'hedge') {
+        pending.add(launch(chain[next++]));
+        continue;
       }
+      const a = winner.a;
+      pending.delete(a);
+      if ('err' in winner) {
+        lastError = winner.err;
+        a.detach();
+        this.record(a.ref, cap, meta, { inputTokens: 0, outputTokens: 0 }, Date.now() - a.started, false, String((winner.err as Error)?.message ?? winner.err));
+        if (req.signal?.aborted) {
+          pending.forEach(stop);
+          throw winner.err;
+        }
+        // Failed before any text: move on right away instead of waiting for the hedge timer.
+        if (!pending.size && next < chain.length) pending.add(launch(chain[next++]));
+        continue;
+      }
+
+      // First answer wins: cancel the others and stream this one.
+      pending.forEach(stop);
+      pending.clear();
+      return this.consume(a.ref, a.it, winner.r, a.started, cap, meta, onText, a.detach);
     }
     throw lastError;
+  }
+
+  private async consume(
+    ref: ModelRef,
+    it: AsyncIterator<StreamChunk>,
+    first: IteratorResult<StreamChunk>,
+    started: number,
+    cap: Tier | 'vision',
+    meta: UsageMeta,
+    onText: (t: string) => void,
+    detach: () => void,
+  ): Promise<ChatResult> {
+    let text = '';
+    let r = first;
+    try {
+      while (!r.done) {
+        const chunk = r.value;
+        if (chunk.type === 'text') {
+          text += chunk.text;
+          onText(chunk.text);
+        } else {
+          const result: ChatResult = { ...chunk, text, provider: ref.provider, model: ref.model };
+          this.record(ref, cap, meta, result, Date.now() - started, true);
+          return result;
+        }
+        r = await it.next();
+      }
+      // Stream ended without an explicit end chunk (aborted).
+      const result: ChatResult = { text, provider: ref.provider, model: ref.model, stopReason: 'aborted', inputTokens: 0, outputTokens: 0 };
+      this.record(ref, cap, meta, result, Date.now() - started, true);
+      return result;
+    } catch (e) {
+      this.record(ref, cap, meta, { inputTokens: 0, outputTokens: 0 }, Date.now() - started, false, String((e as Error).message));
+      throw e;
+    } finally {
+      detach();
+    }
   }
 
   complete(cap: Tier | 'vision', req: ChatRequest, meta: UsageMeta): Promise<ChatResult> {

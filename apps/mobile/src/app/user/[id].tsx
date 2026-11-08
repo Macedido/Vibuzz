@@ -2,6 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { CharacterGrid } from '@/components/character-card';
+import { PremiumBadge } from '@/components/premium-badge';
 import { ActionSheet, Avatar, Button, Card, EmptyState, ErrorState, IconButton, Ionicons, ListItem, Loading, Row, Screen, Section } from '@/components/ui';
 import { useAuth, type Profile } from '@/lib/auth';
 import { unwrap, useQuery } from '@/lib/hooks';
@@ -61,7 +62,10 @@ export default function UserPage() {
           <Avatar path={profile.avatar_path} name={profile.display_name} size={80} />
           <View style={{ flex: 1 }}>
             <Text style={type.h1}>{profile.display_name}</Text>
-            <Text style={type.small}>@{profile.username}</Text>
+            <Row gap={6}>
+              <Text style={type.small}>@{profile.username}</Text>
+              <PremiumBadge until={profile.premium_until} />
+            </Row>
           </View>
         </Row>
         {profile.bio ? <Text style={[type.body, { marginTop: space.md }]}>{profile.bio}</Text> : null}

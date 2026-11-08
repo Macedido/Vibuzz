@@ -1,4 +1,4 @@
-import type { StreamEvent } from '@vibuzz/shared';
+import { PLAN_LIMITS, type StreamEvent } from '@vibuzz/shared';
 import type { Env } from '../../config';
 import { MESSAGE_COLUMNS, must, type CharacterWithSheet, type Db, type ImageAnalysisRef, type MessageRow } from '../../lib/db';
 import { AppError, badRequest, blocked, forbidden, notFound } from '../../lib/errors';
@@ -48,12 +48,17 @@ export class ConversationService {
     if (await this.repo.isBlockedPair(viewer.id, character.creator_id)) throw forbidden('Você não pode conversar com este personagem.');
   }
 
-  private async assertQuota(userId: string) {
+  private async assertQuota(userId: string, premium = false) {
     const { data } = await this.db.rpc('usage_today', { p_user: userId });
     const row = (data as { chat_messages: number; cost_usd: number }[] | null)?.[0];
     if (!row) return;
-    if (Number(row.chat_messages) >= this.env.DAILY_MESSAGE_LIMIT || Number(row.cost_usd) >= this.env.DAILY_COST_LIMIT_USD) {
-      throw new AppError(429, 'daily_limit', 'Você atingiu o limite diário de mensagens. Volte amanhã!');
+    const limit = dailyMessageLimit(this.env, premium);
+    if (Number(row.chat_messages) >= limit || Number(row.cost_usd) >= this.env.DAILY_COST_LIMIT_USD * (premium ? 5 : 1)) {
+      throw new AppError(
+        429,
+        'daily_limit',
+        premium ? 'Você chegou ao limite diário de mensagens. Volta amanhã!' : `Você usou as ${limit} mensagens grátis de hoje. Volta amanhã, ou assine o Premium para ter ${PLAN_LIMITS.premium.messagesPerDay} por dia.`,
+      );
     }
   }
 
@@ -114,7 +119,7 @@ export class ConversationService {
     const conv = await this.repo.conversation(conversationId, userId);
     const character = await this.repo.character(conv.character_id);
     await this.assertCanContinue(character, user);
-    await this.assertQuota(userId);
+    await this.assertQuota(userId, user.isPremium);
 
     const content = input.content.trim();
     if (!content && !input.imagePaths.length) throw badRequest('Mensagem vazia.');
@@ -180,7 +185,7 @@ export class ConversationService {
 
     await this.engine.runTurn({
       conversation: { ...conv, active_leaf_id: userMsg.id },
-      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature },
+      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature, isPremium: user.isPremium },
       parentId: userMsg.id,
       crisis: verdict?.crisis,
       privateTo,
@@ -195,14 +200,14 @@ export class ConversationService {
     const user = await this.assertActive(userId);
     const conv = await this.repo.conversation(conversationId, userId);
     await this.assertCanContinue(await this.repo.character(conv.character_id), user);
-    await this.assertQuota(userId);
+    await this.assertQuota(userId, user.isPremium);
     const msg = await this.repo.message(messageId);
     if (msg.conversation_id !== conv.id || msg.deleted_at) throw notFound('Mensagem');
     if (msg.role !== 'assistant' || !msg.parent_id) throw badRequest('Só respostas do personagem podem ser regeneradas.');
     const parent = await this.repo.message(msg.parent_id);
     await this.engine.runTurn({
       conversation: conv,
-      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature },
+      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature, isPremium: user.isPremium },
       parentId: msg.parent_id,
       privateTo: parent.audience_character_id,
       emit,
@@ -214,13 +219,13 @@ export class ConversationService {
     const user = await this.assertActive(userId);
     const conv = await this.repo.conversation(conversationId, userId);
     await this.assertCanContinue(await this.repo.character(conv.character_id), user);
-    await this.assertQuota(userId);
+    await this.assertQuota(userId, user.isPremium);
     if (!conv.active_leaf_id) throw badRequest('Nada para continuar.');
     const leaf = await this.repo.message(conv.active_leaf_id);
     if (leaf.role !== 'assistant' || leaf.deleted_at) throw badRequest('A última mensagem não é do personagem.');
     await this.engine.runTurn({
       conversation: conv,
-      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature },
+      viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature, isPremium: user.isPremium },
       parentId: leaf.id,
       continueMessageId: leaf.id,
       emit,
@@ -280,10 +285,10 @@ export class ConversationService {
     emit({ type: 'user_message', message: toApiMessage(edited) });
 
     if (edited.role === 'user' && input.regenerate) {
-      await this.assertQuota(userId);
+      await this.assertQuota(userId, user.isPremium);
       await this.engine.runTurn({
         conversation: { ...conv, active_leaf_id: edited.id },
-        viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature },
+        viewer: { id: userId, isAdult: user.isAdult, allowMature: user.allow_mature, isPremium: user.isPremium },
         parentId: edited.id,
         crisis: verdict.crisis,
         privateTo: edited.audience_character_id,
@@ -359,4 +364,9 @@ export class ConversationService {
     await this.purgeMessages(ids);
     return ids.length;
   }
+}
+
+/** Free plan limit comes from DAILY_MESSAGE_LIMIT (default 200); Premium from PLAN_LIMITS. */
+export function dailyMessageLimit(env: { DAILY_MESSAGE_LIMIT: number }, premium: boolean): number {
+  return premium ? Math.max(PLAN_LIMITS.premium.messagesPerDay, env.DAILY_MESSAGE_LIMIT) : env.DAILY_MESSAGE_LIMIT;
 }

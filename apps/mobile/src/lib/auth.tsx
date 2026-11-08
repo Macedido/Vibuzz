@@ -11,6 +11,7 @@ export interface Profile {
   follower_count: number;
   following_count: number;
   character_count: number;
+  premium_until?: string | null;
 }
 
 export interface Account {
@@ -23,6 +24,7 @@ export interface Account {
   timezone?: string;
   plan?: 'free' | 'premium';
   premium_waitlist?: boolean;
+  premium_until?: string | null;
   private_mode?: boolean;
   role: string;
   status: string;

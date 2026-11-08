@@ -68,6 +68,14 @@ Para atualizar a API, troque o `<commit>` pelo commit do bot ("Rebuild edge bund
 
 **Melhorar a IA (grátis):** crie uma chave em [aistudio.google.com/apikey](https://aistudio.google.com/apikey) e adicione `GEMINI_API_KEY` em *Supabase → Edge Functions → Secrets*. Não precisa reimplantar. A IA gratuita sem chave continua como reserva.
 
+## 3a. Vender o Premium (Mercado Pago: Pix, cartão, boleto)
+
+1. Crie uma conta no Mercado Pago e entre em <https://www.mercadopago.com.br/developers/panel/app> → **Criar aplicação** (tipo: pagamentos online, Checkout Pro).
+2. Em **Credenciais de produção**, copie o **Access Token** (começa com `APP_USR-`).
+3. No Supabase: Edge Functions → Secrets → `MERCADOPAGO_ACCESS_TOKEN` = o token. Pronto: a página Premium troca a lista de espera pelos botões de pagamento.
+4. Opcional: em **Webhooks** da aplicação, URL `https://<projeto>.supabase.co/functions/v1/vibuzz-api/v1/billing/webhook`, evento **Pagamentos**; copie a assinatura secreta para `MERCADOPAGO_WEBHOOK_SECRET`. (Sem isso também funciona: a API sempre confere o pagamento direto no Mercado Pago.)
+5. Preços: `PREMIUM_PRICE_MONTH` (padrão 14,90) e `PREMIUM_PRICE_YEAR` (padrão 149). Pagamento único de 30 ou 365 dias, sem cobrança automática; pagar de novo soma tempo.
+
 ## 3b. API em servidor Node (`apps/api`)
 
 ```bash
