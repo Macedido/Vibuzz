@@ -168,7 +168,7 @@ function AndroidInsets({ children }: { children: ReactNode }) {
         : {
             ...insets,
             top: insets.top > 0 ? insets.top : RNStatusBar.currentHeight ?? 24,
-            bottom: insets.bottom > 0 ? insets.bottom : 48,
+            bottom: Math.max(insets.bottom, 48),
           },
     [insets],
   );
