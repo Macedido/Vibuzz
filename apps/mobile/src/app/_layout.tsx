@@ -3,10 +3,10 @@ import * as Linking from 'expo-linking';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { Unbounded_600SemiBold, Unbounded_800ExtraBold, useFonts } from '@expo-google-fonts/unbounded';
-import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Platform, StatusBar as RNStatusBar, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaInsetsContext, SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Banner, HeaderBack } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { checkNotifications, onNotificationTap } from '@/lib/native-notify';
@@ -138,6 +138,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
       <SafeAreaProvider>
+        <AndroidInsets>
         <ThemeProvider value={theme}>
           <StatusBar style="light" />
           {missing.length ? (
@@ -148,7 +149,28 @@ export default function RootLayout() {
             </AuthProvider>
           )}
         </ThemeProvider>
+        </AndroidInsets>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
+
+/**
+ * Some Android phones (Samsung with the 3 buttons) report 0 for the system bars, so
+ * tabs and buttons ended up under the navigation buttons. Use a safe fallback.
+ */
+function AndroidInsets({ children }: { children: ReactNode }) {
+  const insets = useSafeAreaInsets();
+  const fixed = useMemo(
+    () =>
+      Platform.OS !== 'android'
+        ? insets
+        : {
+            ...insets,
+            top: insets.top > 0 ? insets.top : RNStatusBar.currentHeight ?? 24,
+            bottom: insets.bottom > 0 ? insets.bottom : 48,
+          },
+    [insets],
+  );
+  return <SafeAreaInsetsContext.Provider value={fixed}>{children}</SafeAreaInsetsContext.Provider>;
 }
