@@ -291,6 +291,22 @@ export function Avatar({ path, uri, name, size = 44, ring }: { path?: string | n
   );
 }
 
+/** Back arrow for every stacked screen. Opened from a link (no history)? It goes home instead. */
+export function HeaderBack() {
+  const router = useRouter();
+  return (
+    <Pressable
+      onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel="Voltar"
+      style={({ pressed }) => [{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginRight: 4 }, pressed && { backgroundColor: colors.overlay }]}
+    >
+      <Ionicons name="chevron-back" size={24} color={colors.text} />
+    </Pressable>
+  );
+}
+
 /* ------------------------------- States -------------------------------- */
 
 export function Loading({ label }: { label?: string }) {
