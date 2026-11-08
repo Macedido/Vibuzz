@@ -170,7 +170,7 @@ export const PLAN_LIMITS = {
     memoryItems: 12,
     replyTokens: 1200,
     /** ms before a slow model gets a parallel backup. */
-    hedgeMs: 5000,
+    hedgeMs: 3000,
     photoSize: { width: 768, height: 960 },
   },
   premium: {
@@ -180,7 +180,7 @@ export const PLAN_LIMITS = {
     privateCharacters: 200,
     memoryItems: 24,
     replyTokens: 2000,
-    hedgeMs: 2500,
+    hedgeMs: 1500,
     photoSize: { width: 1024, height: 1280 },
   },
 } as const;
