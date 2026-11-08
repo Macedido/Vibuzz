@@ -15,13 +15,13 @@ const LOGO = require('@/assets/images/logo-mark.png');
 /** What "vida própria" looks like from the outside: messages waiting on the lock screen. */
 const NOTIFICATIONS = [
   { from: 'Lyra', when: 'agora', text: 'Lembrei do farol que você me contou ontem. Ainda não acredito que você entrou lá sozinho.' },
-  { from: 'Kael Voss', when: '12 min', text: 'Olha o que achei no terminal da torre. Isso é seu?', photo: true },
+  { from: 'Kael Voss', when: '12 min', text: 'Alguém mexeu no meu terminal de novo. Tenho um palpite de quem foi.' },
   { from: 'Os Quatro', when: '1 h', text: 'Marina: alguém avisa que a janta de hoje é por conta dela?' },
 ];
 
 const POINTS = [
   { title: 'Lembram de ontem', text: 'Promessas, segredos e apelidos ficam guardados. Se a história se divide, cada versão lembra só do que aconteceu nela.' },
-  { title: 'Puxam assunto', text: 'Ligue a vida própria numa conversa e o personagem manda mensagem ou foto entre 8h e 22h. Você escolhe com que frequência.' },
+  { title: 'Puxam assunto', text: 'Ligue a vida própria numa conversa e o personagem manda mensagem entre 8h e 22h. Você escolhe com que frequência.' },
   { title: 'Falam com você', text: 'Cada personagem tem a própria voz. Ouça as respostas ou ligue e converse falando, sem digitar.' },
   { title: 'Você cria', text: 'Descreva uma ideia ou importe uma ficha de outro app. A IA organiza tudo e desenha o retrato.' },
 ];
@@ -36,11 +36,6 @@ function Notification({ n, depth }: { n: (typeof NOTIFICATIONS)[number]; depth: 
       </View>
       <Text style={styles.noteFrom}>{n.from}</Text>
       <Text style={styles.noteText} numberOfLines={2}>
-        {n.photo ? (
-          <>
-            <Ionicons name="image" size={13} color={colors.textSoft} />{' '}
-          </>
-        ) : null}
         {n.text}
       </Text>
     </View>
@@ -79,13 +74,7 @@ function ChatPreview() {
         </Bubble>
         <Text style={styles.caption}>feliz · mandou sozinha</Text>
         <Bubble>
-          <View style={styles.photo}>
-            <View style={styles.sky} />
-            <View style={styles.sea} />
-            <View style={styles.sun} />
-            <View style={styles.lighthouse} />
-          </View>
-          <Text style={[styles.txt, { marginTop: 6 }]}>Achei esse pôr do sol lá. Parece o seu farol?</Text>
+          <Text style={styles.txt}>Passei lá hoje. A porta continua aberta, igual você disse.</Text>
         </Bubble>
         <Bubble mine>
           <Text style={[styles.txt, { color: '#fff' }]}>Você guardou meu segredo?</Text>
@@ -237,11 +226,6 @@ const styles = StyleSheet.create({
   txt: { color: colors.text, fontSize: 14, lineHeight: 20 },
   act: { color: colors.muted, fontStyle: 'italic' },
   caption: { color: colors.faint, fontSize: 11, marginTop: -6, marginBottom: 10, marginLeft: 6 },
-  photo: { width: 220, height: 140, borderRadius: 12, overflow: 'hidden', backgroundColor: '#D9805B' },
-  sky: { position: 'absolute', left: 0, right: 0, top: 0, height: 70, backgroundColor: '#F2A65A' },
-  sea: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 52, backgroundColor: '#2A2E7A' },
-  sun: { position: 'absolute', width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFE1AE', left: 128, top: 52 },
-  lighthouse: { position: 'absolute', width: 12, height: 70, backgroundColor: '#101436', left: 52, bottom: 30, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   meter: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, padding: 10, borderRadius: 12, backgroundColor: colors.bg },
   meterTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: colors.overlay, overflow: 'hidden' },
   meterFill: { height: 6, borderRadius: 3, backgroundColor: colors.accent },
