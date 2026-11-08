@@ -2,7 +2,7 @@
   "expo": {
     "name": "Vibuzz",
     "slug": "vibuzz",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vibuzz",
@@ -29,7 +29,7 @@
         "RECEIVE_BOOT_COMPLETED",
         "RECORD_AUDIO"
       ],
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "output": "single",
@@ -71,7 +71,8 @@
             "com.google.android.googlequicksearchbox"
           ]
         }
-      ]
+      ],
+      "./plugins/with-keep-workmanager.js"
     ],
     "experiments": {
       "typedRoutes": true,
