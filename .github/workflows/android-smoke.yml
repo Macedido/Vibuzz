@@ -1,0 +1,50 @@
+name: Android smoke test
+
+# Installs the latest released APK on an emulator, opens it and prints the crash log (if any).
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Android APK]
+    types: [completed]
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download the latest APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download --repo "${{ github.repository }}" --pattern vibuzz.apk --dir .
+      - name: Open the app on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r vibuzz.apk
+            adb logcat -c
+            adb shell monkey -p app.vibuzz.mobile -c android.intent.category.LAUNCHER 1
+            sleep 30
+            adb shell pidof app.vibuzz.mobile && echo "RESULT: app is running" || echo "RESULT: app is NOT running (crashed)"
+            adb exec-out screencap -p > screen.png
+            adb logcat -d > logcat.txt
+            echo "----- crash lines -----"
+            grep -E "FATAL|AndroidRuntime|ReactNativeJS|ReactNative|Expo|Hermes|SoLoader|UnsatisfiedLink|Exception|Error" logcat.txt | grep -v "chatty" | tail -n 250 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-result
+          path: |
+            screen.png
+            logcat.txt
+          if-no-files-found: ignore
