@@ -109,7 +109,7 @@ export function createServices(env: Env, log: Logger, hooks: RuntimeHooks = {}):
     gemini: geminiKey ? { apiKey: geminiKey, bases: geminiBasesFor(geminiKey, env.GEMINI_NATIVE_BASE) } : undefined,
     log: (msg, extra) => log.warn((extra ?? {}) as Record<string, unknown>, msg),
   });
-  const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages, env.IMAGE_GEN === false ? undefined : images, (premium) =>
+  const engine = new IntelligenceEngine(repo, ai, memory, storage, ai.supportsInlineImages, env.IMAGE_GEN === false || env.CHAT_PHOTOS !== true ? undefined : images, (premium) =>
     PLAN_LIMITS[premium ? 'premium' : 'free'].imagesPerDay,
   );
   const push = new PushService(db, log);
