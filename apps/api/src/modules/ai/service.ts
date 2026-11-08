@@ -139,7 +139,7 @@ export class AiService {
       ),
       vision: parseChain(
         env.MODEL_VISION ??
-          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest', has('openai') && 'openai:gpt-5-mini', free(FREE_VISION)),
+          pick(has('anthropic') && 'anthropic:claude-sonnet-5-5', has('gemini') && 'gemini:gemini-flash-latest,gemini:gemini-3-flash-preview,gemini:gemini-flash-lite-latest', has('openai') && 'openai:gpt-5-mini', free(FREE_VISION)),
       ),
       // Embedding model must stay the same once memories exist (vectors are not comparable across models).
       embedding: parseChain(
