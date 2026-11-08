@@ -754,7 +754,7 @@ export default function ChatScreen() {
           <Text style={[type.small, { marginTop: space.md, color: colors.faint }]}>Enter envia · Shift+Enter pula linha</Text>
         </View>
       ) : null}
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={insets.top + 44}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 44 : insets.top + 56 - insets.bottom}>
         <View style={{ flex: 1 }}>
         <FlatList
           ref={listRef}
