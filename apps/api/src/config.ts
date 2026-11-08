@@ -39,6 +39,8 @@ const envSchema = z.object({
   GEMINI_NATIVE_BASE: z.string().url().optional(),
   POLLINATIONS_IMAGE_URL: z.string().url().default('https://image.pollinations.ai'),
   IMAGE_GEN: bool,
+  /** Characters sending photos in the chat ("[foto: …]"). Off unless CHAT_PHOTOS=true. */
+  CHAT_PHOTOS: bool,
   /** Run the classifier on every private chat message (default: only with a keyed provider). */
   MODERATE_PRIVATE_CHAT: bool,
 
