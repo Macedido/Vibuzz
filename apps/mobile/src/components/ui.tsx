@@ -57,7 +57,7 @@ export function Screen({
     <View style={[{ flex: 1 }, padded && { padding: space.lg }, style]}>{children}</View>
   );
   const body = keyboard ? (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={90}>
       {content}
     </KeyboardAvoidingView>
   ) : (
@@ -393,7 +393,7 @@ export function Panel({ visible, onClose, title, children }: { visible: boolean;
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <Pressable style={styles.backdrop} onPress={onClose}>
           <Pressable style={[styles.sheet, { paddingBottom: insets.bottom + space.lg, maxHeight: '88%' }]} onPress={() => {}}>
             <View style={styles.grabber} />
