@@ -21,7 +21,6 @@ const ROWS: { label: string; free: string; premium: string }[] = [
   { label: 'Resposta começa mais rápido', free: 'Normal', premium: 'Prioridade' },
   { label: 'Tamanho das respostas', free: 'Normal', premium: 'Até 2× maior' },
   { label: 'Lembranças usadas em cada resposta', free: String(F.memoryItems), premium: String(P.memoryItems) },
-  { label: 'Fotos dos personagens por dia', free: String(F.imagesPerDay), premium: `${P.imagesPerDay} em HD` },
   { label: 'Mensagens espontâneas por dia', free: `até ${F.proactivePerDay.often}`, premium: `até ${P.proactivePerDay.often}` },
   { label: 'Personagens privados', free: String(F.privateCharacters), premium: String(P.privateCharacters) },
   { label: 'Selo Premium no perfil', free: '—', premium: 'Sim' },
@@ -104,7 +103,7 @@ export default function Premium() {
       <View style={{ maxWidth: 720, width: '100%', alignSelf: 'center' }}>
         <Text style={styles.title}>Vibuzz Premium</Text>
         <Text style={[type.body, { marginTop: space.sm, maxWidth: 520 }]}>
-          O plano grátis continua completo. O Premium é para quem passa horas nas histórias: mais mensagens, respostas mais rápidas e longas, mais memória e mais fotos.
+          O plano grátis continua completo. O Premium é para quem passa horas nas histórias: mais mensagens, respostas mais rápidas e longas e mais memória.
         </Text>
 
         {message ? (
