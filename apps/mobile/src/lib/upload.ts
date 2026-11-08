@@ -1,4 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
+import { Platform } from 'react-native';
+import { cropImageWeb } from './crop-web';
 import { supabase } from './supabase';
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -34,18 +36,30 @@ export interface PickedImage {
 
 /** Opens the gallery. Returns null when cancelled or permission denied. */
 export async function pickImage(opts: { square?: boolean } = {}): Promise<PickedImage | null> {
-  const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!perm.granted) throw new Error('Permita o acesso às fotos nas configurações do aparelho.');
+  const web = Platform.OS === 'web';
+  if (!web) {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) throw new Error('Permita o acesso às fotos nas configurações do aparelho.');
+  }
+  // Native: the system cropper (move + resize). Web: our own cropper below.
   const res = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ['images'],
-    allowsEditing: Boolean(opts.square),
+    allowsEditing: !web,
     aspect: opts.square ? [1, 1] : undefined,
     quality: 0.7,
     base64: true,
   });
-  if (res.canceled || !res.assets?.[0]?.base64) return null;
+  if (res.canceled || !res.assets?.[0]) return null;
   const a = res.assets[0];
-  return { uri: a.uri, base64: a.base64!, mimeType: a.mimeType ?? 'image/jpeg' };
+  if (web) {
+    const src = a.uri || (a.base64 ? `data:${a.mimeType ?? 'image/jpeg'};base64,${a.base64}` : '');
+    if (!src) return null;
+    const out = await cropImageWeb(src, opts.square ? 1 : null);
+    if (!out) return null;
+    return { uri: out, base64: out.slice(out.indexOf(',') + 1), mimeType: 'image/jpeg' };
+  }
+  if (!a.base64) return null;
+  return { uri: a.uri, base64: a.base64, mimeType: a.mimeType ?? 'image/jpeg' };
 }
 
 /** Uploads into "<userId>/<folder>/..." of a bucket and returns the storage path. */
