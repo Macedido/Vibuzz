@@ -310,25 +310,40 @@ export class ConversationService {
   async deleteMessage(userId: string, messageId: string, purge: boolean) {
     const msg = await this.repo.message(messageId);
     const conv = await this.repo.conversation(msg.conversation_id, userId);
-    if (!msg.deleted_at) {
-      await this.db.from('messages').update({ deleted_at: new Date().toISOString(), hidden_reason: 'deleted' }).eq('id', msg.id);
-    }
-    await this.memory.invalidateForMessages([msg.id], { purge });
-    if (purge) await this.purgeMessages([msg.id]);
+    // Deleting your message also deletes the character's reply to it (every version,
+    // and in groups every member who answered), like "apagar para todos" on WhatsApp.
+    const ids = [msg.id, ...(msg.role === 'user' ? await this.replyChain(conv.id, msg.id) : [])];
+    await this.db.from('messages').update({ deleted_at: new Date().toISOString(), hidden_reason: 'deleted' }).in('id', ids).is('deleted_at', null);
+    await this.memory.invalidateForMessages(ids, { purge });
+    if (purge) await this.purgeMessages(ids);
 
-    if (conv.active_leaf_id === msg.id) {
-      const { count } = await this.db.from('messages').select('id', { count: 'exact', head: true }).eq('parent_id', msg.id).is('deleted_at', null);
-      if (!count) {
-        // Move the leaf to the nearest visible ancestor.
-        const path = await this.repo.pathMessages(msg.parent_id);
-        const leaf = path[path.length - 1]?.id ?? null;
-        await this.db
-          .from('conversations')
-          .update({ active_leaf_id: leaf, last_message_preview: truncate(path[path.length - 1]?.content ?? '', 140) })
-          .eq('id', conv.id);
-      }
+    if (conv.active_leaf_id && ids.includes(conv.active_leaf_id)) {
+      const path = await this.repo.pathMessages(msg.parent_id);
+      const leaf = path[path.length - 1] ?? null;
+      await this.db
+        .from('conversations')
+        .update({ active_leaf_id: leaf?.id ?? null, last_message_preview: truncate(leaf?.content ?? '', 140) })
+        .eq('id', conv.id);
     }
-    return { deleted: true, purged: purge };
+    return { deleted: true, purged: purge, ids };
+  }
+
+  /** Assistant messages that answer this one (all versions), down to the next user message. */
+  private async replyChain(conversationId: string, fromId: string): Promise<string[]> {
+    const out: string[] = [];
+    let frontier = [fromId];
+    for (let depth = 0; depth < 8 && frontier.length; depth++) {
+      const { data } = await this.db
+        .from('messages')
+        .select('id, role')
+        .eq('conversation_id', conversationId)
+        .in('parent_id', frontier)
+        .eq('role', 'assistant')
+        .is('deleted_at', null);
+      frontier = ((data as { id: string }[] | null) ?? []).map((r) => r.id);
+      out.push(...frontier);
+    }
+    return out;
   }
 
   async purgeMessages(ids: string[]) {
