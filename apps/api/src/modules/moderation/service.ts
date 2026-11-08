@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Db } from '../../lib/db';
+import { AppError } from '../../lib/errors';
 import type { AiService, UsageMeta } from '../ai/service';
 
 export const MOD_CATEGORIES = [
@@ -164,7 +165,8 @@ export class ModerationService {
       return await this.classifyImage(img, ctx, meta);
     } catch (e) {
       if (ctx === 'image_chat') return decide([], ctx);
-      throw e;
+      if (e instanceof AppError) throw e;
+      throw new AppError(503, 'image_check_unavailable', 'Não deu para verificar a imagem agora (servidor ocupado). Tente de novo em 1 minuto.');
     }
   }
 
