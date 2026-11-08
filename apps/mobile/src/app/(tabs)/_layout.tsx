@@ -1,3 +1,4 @@
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
 import { Platform, Text, useWindowDimensions, View } from 'react-native';
@@ -34,6 +35,7 @@ function CreateIcon({ focused, wide }: { focused: boolean; wide: boolean }) {
 export default function TabsLayout() {
   const { width } = useWindowDimensions();
   const wide = Platform.OS === 'web' && width >= SIDEBAR_MIN_WIDTH;
+  const bottom = useSafeAreaInsets().bottom;
   return (
     <Tabs
       screenOptions={{
@@ -45,7 +47,7 @@ export default function TabsLayout() {
         tabBarActiveBackgroundColor: wide ? colors.raised : undefined,
         tabBarStyle: wide
           ? { backgroundColor: colors.surface, borderRightColor: colors.borderSoft, borderRightWidth: 1, width: 232, minWidth: 232, paddingTop: 12 }
-          : { backgroundColor: 'rgba(10,10,15,0.97)', borderTopColor: colors.borderSoft, height: Platform.OS === 'web' ? 64 : undefined },
+          : { backgroundColor: 'rgba(10,10,15,0.97)', borderTopColor: colors.borderSoft, height: Platform.OS === 'web' ? 64 : 58 + bottom, paddingBottom: Platform.OS === 'web' ? undefined : bottom },
         tabBarItemStyle: wide ? { borderRadius: 12, marginHorizontal: 10, marginVertical: 2, height: 48 } : undefined,
         tabBarLabelStyle: wide ? { fontSize: 15, fontWeight: '700' } : { fontSize: 11, fontWeight: '600' },
         tabBarLabelPosition: wide ? 'beside-icon' : 'below-icon',
