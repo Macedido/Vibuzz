@@ -8,6 +8,16 @@ export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta
 export const VERTEX_EXPRESS_BASE = 'https://aiplatform.googleapis.com/v1/publishers/google/models';
 
 /** Model ids are the same on both, but only the Gemini API has the "-latest" aliases. */
+interface Variant {
+  thinking: boolean;
+  raw: boolean;
+}
+const DEFAULT_VARIANT: Variant = { thinking: true, raw: false };
+const RETRY_VARIANTS: Variant[] = [
+  { thinking: false, raw: false },
+  { thinking: false, raw: true },
+];
+
 const VERTEX_MODEL: Record<string, string> = {
   'gemini-flash-latest': 'gemini-2.5-flash',
   'gemini-flash-lite-latest': 'gemini-2.5-flash-lite',
@@ -43,7 +53,10 @@ export class GeminiProvider implements ChatProvider {
     private firstByteTimeoutMs = 20_000,
   ) {}
 
-  private body(model: string, req: ChatRequest) {
+  /** Request shape that worked per model (some models reject thinkingConfig or the mapped id). */
+  private variant = new Map<string, Variant>();
+
+  private body(model: string, req: ChatRequest, thinking = true) {
     const system = [req.system.stable, req.system.dynamic, req.json ? 'Respond with a single valid JSON object only.' : ''].filter(Boolean).join('\n\n');
     const contents = req.messages.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: toParts(m.content) }));
     if (!contents.length || contents[0].role !== 'user') contents.unshift({ role: 'user', parts: [{ text: '[A conversa começa.]' }] });
@@ -57,13 +70,13 @@ export class GeminiProvider implements ChatProvider {
         ...(req.json ? { responseMimeType: 'application/json' } : {}),
         // Thinking adds seconds before the first token; roleplay and our JSON tasks do fine without it.
         // Gemini 3 models cannot switch thinking off; "low" keeps them quick.
-        thinkingConfig: model.startsWith('gemini-3') ? { thinkingLevel: 'low' } : { thinkingBudget: 0 },
+        ...(thinking ? { thinkingConfig: model.startsWith('gemini-3') ? { thinkingLevel: 'low' } : { thinkingBudget: 0 } } : {}),
       },
     };
   }
 
-  private async post(base: string, model: string, req: ChatRequest): Promise<Response> {
-    const id = base === VERTEX_EXPRESS_BASE ? (VERTEX_MODEL[model] ?? model) : model;
+  private async post(base: string, model: string, req: ChatRequest, v: Variant = this.variant.get(model) ?? DEFAULT_VARIANT): Promise<Response> {
+    const id = base === VERTEX_EXPRESS_BASE && !v.raw ? (VERTEX_MODEL[model] ?? model) : model;
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     req.signal?.addEventListener('abort', onAbort, { once: true });
@@ -72,7 +85,7 @@ export class GeminiProvider implements ChatProvider {
       return await this.fetchImpl(`${base}/${id}:streamGenerateContent?alt=sse`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
-        body: JSON.stringify(this.body(model, req)),
+        body: JSON.stringify(this.body(model, req, v.thinking)),
         signal: ctrl.signal,
       });
     } catch (e) {
@@ -88,7 +101,9 @@ export class GeminiProvider implements ChatProvider {
     const candidates = this.base ? [this.base] : this.bases;
     let res: Response | null = null;
     let lastError = '';
+    let used = candidates[0];
     for (const base of candidates) {
+      used = base;
       res = await this.post(base, model, req);
       // A key from the other product is rejected with 400/401/403/404: try the next base.
       if (!this.base && [400, 401, 403, 404].includes(res.status) && base !== candidates[candidates.length - 1]) {
@@ -98,6 +113,19 @@ export class GeminiProvider implements ChatProvider {
       }
       if (res.ok) this.base = base;
       break;
+    }
+    // Rejected request shape (400/404): retry without thinkingConfig, then with the plain model name.
+    if (res && (res.status === 400 || res.status === 404) && !this.variant.has(model)) {
+      for (const v of RETRY_VARIANTS) {
+        await res.text().catch(() => '');
+        res = await this.post(used, model, req, v);
+        if (res.ok) {
+          this.variant.set(model, v);
+          this.base = used;
+          break;
+        }
+        if (res.status !== 400 && res.status !== 404) break;
+      }
     }
     if (!res || !res.ok || !res.body) {
       const status = res?.status ?? null;
