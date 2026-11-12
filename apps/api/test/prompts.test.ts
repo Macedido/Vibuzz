@@ -42,7 +42,7 @@ describe('buildSystemPrompt', () => {
     expect(buildSystemPrompt({ ...base, viewer: { isAdult: false, allowMature: false } }).stable).toContain('The user is a teenager');
     const mature = buildSystemPrompt({ ...base, character: { ...base.character, maturity: 'mature' }, viewer: { isAdult: true, allowMature: true } });
     expect(mature.stable).toContain('Mature themes are allowed');
-    expect(mature.stable).toContain('fade to black');
+    expect(mature.stable).toContain('Never describe explicit sexual acts');
     const notOpted = buildSystemPrompt({ ...base, character: { ...base.character, maturity: 'mature' }, viewer: { isAdult: true, allowMature: false } });
     expect(notOpted.stable).toContain('PG-13');
   });
