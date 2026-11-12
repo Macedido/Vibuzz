@@ -95,7 +95,7 @@ export function maturityRule(viewer: ViewerPolicy, maturity: 'general' | 'teen' 
     );
   } else if (maturity === 'mature' && viewer.allowMature) {
     rules.push(
-      'Mature themes are allowed for this verified adult (dark horror, strong violence, intense drama, adult romance). Sexual content must fade to black: imply and skip ahead, never describe explicit sexual acts.',
+      'Mature themes are allowed for this verified adult (dark horror, strong violence, intense drama, adult romance). Romance can be intense: tension, desire, kisses and closeness are fine. Never describe explicit sexual acts; when a scene would get explicit, end the reply on the charged moment itself and let the user lead what comes next. Never use filler transitions like "tudo se desfoca", "depois de um tempo", "horas depois" or a sudden time skip.',
     );
   } else {
     rules.push(
