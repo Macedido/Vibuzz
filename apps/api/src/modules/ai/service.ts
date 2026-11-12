@@ -28,6 +28,29 @@ export const FREE_FAST = [
   'ovh:Meta-Llama-3_3-70B-Instruct',
   'pollinations:openai',
 ] as const;
+const FREE_PROVIDERS = new Set(['ovh', 'pollinations']);
+const BACKGROUND_KINDS = new Set(['summary', 'memory_extract', 'memory_rebuild', 'scene']);
+/** About 3k tokens of chat history for the keyless models. */
+const FREE_HISTORY_CHARS = 12_000;
+
+function textLength(content: ChatRequest['messages'][number]['content']): number {
+  if (typeof content === 'string') return content.length;
+  return content.reduce((n, p) => n + ('text' in p && typeof p.text === 'string' ? p.text.length : 1000), 0);
+}
+
+/** Keeps the newest messages that fit in `maxChars` (at least the last two). */
+export function recentMessages(messages: ChatRequest['messages'], maxChars: number): ChatRequest['messages'] {
+  let total = 0;
+  let start = messages.length;
+  while (start > 0) {
+    const len = textLength(messages[start - 1].content);
+    if (messages.length - start >= 2 && total + len > maxChars) break;
+    total += len;
+    start--;
+  }
+  return start === 0 ? messages : messages.slice(start);
+}
+
 export const FREE_VISION = ['ovh:Mistral-Small-3.2-24B-Instruct-2506', 'ovh:Qwen2.5-VL-72B-Instruct'] as const;
 
 /** USD per million tokens. Override or extend with MODEL_PRICING. */
@@ -194,8 +217,11 @@ export class AiService {
    * is slow to start, the next one runs in parallel and the first to answer wins.
    */
   async stream(cap: Tier | 'vision', req: ChatRequest, meta: UsageMeta, onText: (t: string) => void): Promise<ChatResult> {
-    const chain = this.chains[cap];
-    if (!chain.length) throw new NotConfiguredError('modelo de linguagem');
+    const all = this.chains[cap];
+    if (!all.length) throw new NotConfiguredError('modelo de linguagem');
+    // Background work (summaries, memories, scene) goes to the free models so Gemini's daily quota lasts for replies.
+    const freeOnly = BACKGROUND_KINDS.has(meta.kind) ? all.filter((r) => FREE_PROVIDERS.has(r.provider)) : [];
+    const chain = freeOnly.length ? freeOnly : all;
     const hedgeMs = req.hedgeMs ?? (req.json ? 12_000 : 5_000);
 
     type First = { a: Attempt; r: IteratorResult<StreamChunk> } | { a: Attempt; err: unknown };
@@ -211,7 +237,9 @@ export class AiService {
       const ctrl = new AbortController();
       const onAbort = () => ctrl.abort();
       req.signal?.addEventListener('abort', onAbort, { once: true });
-      const it = this.providers.get(ref.provider)!.stream(ref.model, { ...req, signal: ctrl.signal })[Symbol.asyncIterator]();
+      // Free models are slow with long chats: send them only the recent part.
+      const r = FREE_PROVIDERS.has(ref.provider) ? { ...req, messages: recentMessages(req.messages, FREE_HISTORY_CHARS) } : req;
+      const it = this.providers.get(ref.provider)!.stream(ref.model, { ...r, signal: ctrl.signal })[Symbol.asyncIterator]();
       const a = { ref, ctrl, it, started: Date.now(), detach: () => req.signal?.removeEventListener('abort', onAbort) } as Attempt;
       a.first = it.next().then(
         (r): First => ({ a, r }),
