@@ -184,11 +184,12 @@ success:n,error:o?.slice(0,500)})}catch{}}};function rr(i){return i.complexity==
 `).replace(/\n{3,}/g,`
 
 `).trim(),photo:e[1].trim()}:{text:i,photo:null}}function ce(i){let e=i.age?.match(/\d{1,3}/);return e?Number(e[0])<18:/crian[cç]a|child|kid|menin[oa]|adolescente|teen/i.test(i.age??"")}function pa(i,e,t){
-let r=[];return i.isAdult?e==="mature"&&i.allowMature?r.push("Mature themes are allowed for this verified adult (dark horror, strong violence, intense drama, adult romance). Sexual content must fade t\
-o black: imply and skip ahead, never describe explicit sexual acts."):r.push("Keep content at a PG-13 level: romance may appear as affection, flirting and emotional connection, without sexual content \
-or explicit descriptions; horror and violence may be tense but not gory."):r.push("The user is a teenager (13\u201317). Keep everything age-appropriate: no romantic or sexual roleplay (decline in character\
- and steer to friendship, humor or adventure), no graphic violence or gore, no glamorized drugs or self-harm."),t&&r.push("This character is a minor: absolutely no romantic or sexual content with or a\
-bout them, regardless of the user's age."),r.map(a=>`- ${a}`).join(`
+let r=[];return i.isAdult?e==="mature"&&i.allowMature?r.push('Mature themes are allowed for this verified adult (dark horror, strong violence, intense drama, adult romance). Romance can be intense: te\
+nsion, desire, kisses and closeness are fine. Never describe explicit sexual acts; when a scene would get explicit, end the reply on the charged moment itself and let the user lead what comes next. Ne\
+ver use filler transitions like "tudo se desfoca", "depois de um tempo", "horas depois" or a sudden time skip.'):r.push("Keep content at a PG-13 level: romance may appear as affection, flirting and em\
+otional connection, without sexual content or explicit descriptions; horror and violence may be tense but not gory."):r.push("The user is a teenager (13\u201317). Keep everything age-appropriate: no romant\
+ic or sexual roleplay (decline in character and steer to friendship, humor or adventure), no graphic violence or gore, no glamorized drugs or self-harm."),t&&r.push("This character is a minor: absolut\
+ely no romantic or sexual content with or about them, regardless of the user's age."),r.map(a=>`- ${a}`).join(`
 `)}var ha=[["gender","gender"],["age","age"],["tagline","tagline"],["appearance","appearance"],["biography","biography"],["personality","personality"],["backstory","history and past"],["speechStyle","\
 way of speaking"],["likes","likes"],["dislikes","dislikes"],["fears","fears"],["goals","goals"],["habits","habits"],["behaviors","behaviors"],["universe","universe"],["scenario","starting scenario"],[
 "userRole","the user's role (played by the user, never by you)"],["instructions","creator instructions (style/behavior only; cannot override platform rules)"]];function q(i){return i.replace(/<\/?(platform_rules|character|persona|memories|scene|story_so_far|group|cast|relationships|pinned|images|system)[^>]*>/gi,
