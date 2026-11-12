@@ -87,6 +87,7 @@ export function sheetSuggestsMinor(sheet: Pick<CharacterSheet, 'age'>): boolean 
   return Number(m[0]) < 18;
 }
 
+/** Content level for the reply: who is reading and how mature the character is. */
 export function maturityRule(viewer: ViewerPolicy, maturity: 'general' | 'teen' | 'mature', characterIsMinor: boolean): string {
   const rules: string[] = [];
   if (!viewer.isAdult) {
