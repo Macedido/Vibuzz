@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { useEffect, useRef, useState, type ComponentType } from 'react';
 import { ActivityIndicator, BackHandler, Platform, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView as RNWebView } from 'react-native-webview';
 import { colors } from '@/lib/theme';
 
@@ -13,6 +14,7 @@ const URL = 'https://www.polybuzz.ai/';
 export default function PolyBuzz() {
   const ref = useRef<{ goBack: () => void } | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
+  const bottom = useSafeAreaInsets().bottom;
 
   // Android back button goes back inside the site first.
   useEffect(() => {
@@ -35,7 +37,7 @@ export default function PolyBuzz() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingBottom: bottom }}>
       <Stack.Screen options={{ title: 'PolyBuzz' }} />
       <WebView
         ref={ref}
