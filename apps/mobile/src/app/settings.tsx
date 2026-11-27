@@ -2,7 +2,6 @@ import { isPremiumActive } from '@vibuzz/shared';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import * as Linking from 'expo-linking';
-import * as WebBrowser from 'expo-web-browser';
 import { Alert, Platform, Text, TextInput, View } from 'react-native';
 import { Avatar, Banner, Button, Card, IconButton, ListItem, Panel, Row, Screen, Section, ToggleRow } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
@@ -171,7 +170,7 @@ export default function Settings() {
         <Section title="Seu plano">
           <ListItem icon="star-outline" title="Vibuzz Premium" subtitle={isPremiumActive(account) ? `Ativo${account?.premium_until ? ` até ${new Date(account.premium_until).toLocaleDateString('pt-BR')}` : ''}` : 'Mais mensagens, memória e respostas longas'} onPress={() => router.push('/premium')} />
           <ListItem icon="trophy-outline" title="Conquistas" onPress={() => router.push('/achievements')} />
-          <ListItem icon="open-outline" title="PolyBuzz" subtitle="Abre aqui dentro" onPress={() => WebBrowser.openBrowserAsync('https://www.polybuzz.ai/')} />
+          <ListItem icon="open-outline" title="PolyBuzz" subtitle="Abre aqui dentro" onPress={() => router.push('/polybuzz')} />
         </Section>
 
         <Section title="Conteúdo e privacidade">
